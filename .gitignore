@@ -1,0 +1,44 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Environment & secrets
+.env
+.env.*
+*.env
+
+# Reports output (generated — don't commit)
+reports/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# JetBrains / PyCharm (just in case)
+.idea/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter (if you ever extend with notebooks)
+.ipynb_checkpoints/
+*.ipynb
