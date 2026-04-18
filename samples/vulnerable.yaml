@@ -1,0 +1,66 @@
+# samples/vulnerable.yaml
+# Intentionally misconfigured manifest for testing the checker agent
+# DO NOT deploy this in production!
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-api
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-api
+  template:
+    metadata:
+      # Note: no labels on pod template
+    spec:
+      hostPID: true
+      hostIPC: true
+      hostNetwork: true
+      automountServiceAccountToken: true
+      containers:
+        - name: api
+          image: nginx:latest
+          securityContext:
+            privileged: true
+            runAsUser: 0
+            readOnlyRootFilesystem: false
+            capabilities:
+              add:
+                - SYS_ADMIN
+                - NET_ADMIN
+                - ALL
+          env:
+            - name: DATABASE_PASSWORD
+              value: "super-secret-password-123"
+            - name: API_SECRET_KEY
+              value: "my-hardcoded-api-key"
+            - name: APP_ENV
+              value: "production"
+          # No resource limits
+          # No liveness probe
+          # No readiness probe
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: overprivileged-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dangerous-role
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
