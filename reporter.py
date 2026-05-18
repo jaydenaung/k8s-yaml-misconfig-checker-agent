@@ -180,7 +180,7 @@ def render_report(
 
     lines += [
         "---",
-        f"*K8s Misconfiguration Checker — AI-powered security scanner*",
+        f"*KubeSentinel — AI-powered Kubernetes security agent*",
     ]
 
     return "\n".join(lines)

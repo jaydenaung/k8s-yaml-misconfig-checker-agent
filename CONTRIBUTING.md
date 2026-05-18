@@ -1,4 +1,4 @@
-# Contributing to K8s YAML Misconfiguration Checker Agent
+# Contributing to KubeSentinel
 
 Thank you for contributing! This document covers how to add new static checks,
 new agent tools, run tests, and submit pull requests.
@@ -6,8 +6,8 @@ new agent tools, run tests, and submit pull requests.
 ## Setup
 
 ```bash
-git clone https://github.com/jaydenaung/k8s-yaml-misconfig-checker-agent.git
-cd k8s-yaml-misconfig-checker-agent
+git clone https://github.com/jaydenaung/kubesentinel.git
+cd kubesentinel
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt

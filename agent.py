@@ -4,7 +4,7 @@
 #
 # Author: Jayden Aung
 """
-K8s YAML Misconfiguration Checker Agent by Jayden Aung
+KubeSentinel — AI-powered Kubernetes Security Agent by Jayden Aung
 
 Usage:
     python agent.py <manifest.yaml>
@@ -34,7 +34,7 @@ from suppressor import load_suppressions, apply_suppressions
 
 def main():
     parser = argparse.ArgumentParser(
-        description="K8s YAML Misconfiguration Checker — AI security agent"
+        description="KubeSentinel — AI-powered Kubernetes security agent"
     )
     parser.add_argument(
         "manifest",
@@ -71,7 +71,7 @@ def main():
     is_dir  = manifest_path.is_dir() and not is_helm
 
     label = "Helm chart" if is_helm else ("directory" if is_dir else "manifest")
-    print(f"\n  K8s Misconfiguration Checker — Agent Mode")
+    print(f"\n  KubeSentinel — AI-powered Kubernetes Security Agent")
     print(f"  Analyzing {label}: {manifest_path}\n")
 
     # Load suppression rules from .k8s-checker-ignore.yaml

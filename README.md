@@ -1,4 +1,4 @@
-# K8s YAML Misconfiguration Checker Agent by Jayden Aung
+# KubeSentinel — AI-powered Kubernetes Security Agent by Jayden Aung
 
 A true AI security agent for Kubernetes manifests. Claude drives the analysis using the
 Anthropic tool_use API — deciding which checks to run, scanning images for CVEs, querying
@@ -39,8 +39,8 @@ Claude decides the order and depth of investigation based on what it finds.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/jaydenaung/k8s-yaml-misconfig-checker-agent.git
-cd k8s-yaml-misconfig-checker-agent
+git clone https://github.com/jaydenaung/kubesentinel.git
+cd kubesentinel
 
 # 2. Create and activate a virtual environment
 python3 -m venv venv
@@ -171,7 +171,7 @@ All tests run offline — no API key or cluster connection required.
 ## Project structure
 
 ```
-k8s-yaml-misconfig-checker-agent/
+kubesentinel/
 ├── agent.py            # Entry point — CLI arg parsing, orchestration
 ├── analyzer.py         # YAML parser, static checks, CHECK_REGISTRY
 ├── claude_agent.py     # Agentic loop using Anthropic tool_use API
