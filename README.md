@@ -48,7 +48,8 @@ source venv/bin/activate        # macOS/Linux
 # venv\Scripts\activate         # Windows
 
 # 3. Install dependencies
-pip install -r requirements.txt
+# Use python -m pip to guarantee packages install into the active venv
+python -m pip install -r requirements.txt
 
 # 4. Set your Anthropic API key
 cp .env.example .env
@@ -196,7 +197,7 @@ k8s-yaml-misconfig-checker-agent/
 # GitHub Actions example
 - name: K8s security check
   run: |
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
     python agent.py k8s/ --output reports/security.md
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -220,3 +221,40 @@ automatically.
 
 **Tune the agent's focus:** adjust `SYSTEM_PROMPT` in `claude_agent.py` to bias Claude
 toward specific workload types — 5G core NFs, CNF sidecars, service mesh, DPDK, etc.
+
+## Troubleshooting
+
+**`ModuleNotFoundError: No module named 'dotenv'` (or any other module)**
+
+This means `pip` installed the package into the system Python instead of your venv.
+Always use `python -m pip` after activating the venv:
+
+```bash
+source venv/bin/activate
+python -m pip install -r requirements.txt
+
+# Verify the right Python is active
+which python        # should point inside your venv/bin/
+python -m pip list  # should show anthropic, pyyaml, etc.
+```
+
+**`ANTHROPIC_API_KEY not set`**
+
+Either export it in your shell or add it to a `.env` file in the project root:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+# or
+echo "ANTHROPIC_API_KEY=sk-ant-your-key-here" > .env
+```
+
+**Trivy / helm / kubectl not found**
+
+These are optional. The agent skips each step gracefully if the tool isn't installed.
+Install only what you need:
+
+```bash
+brew install trivy    # CVE scanning
+brew install helm     # Helm chart rendering
+# kubectl — install via your cloud provider CLI or https://kubernetes.io/docs/tasks/tools/
+```
