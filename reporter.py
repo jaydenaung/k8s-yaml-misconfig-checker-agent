@@ -186,6 +186,122 @@ def render_report(
     return "\n".join(lines)
 
 
+def render_pr_comment(
+    files_scanned: List[str],
+    resources: List[Dict],
+    findings: List[Dict],
+    suppressed: List[Dict] = None,
+    run_url: str = "",
+) -> str:
+    suppressed = suppressed or []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
+    kinds = [r.get("kind", "Unknown") for r in resources]
+
+    counts = {s: 0 for s in SEVERITY_ORDER}
+    for f in findings:
+        sev = f.get("severity", "INFO")
+        counts[sev] = counts.get(sev, 0) + 1
+
+    score = (
+        counts.get("CRITICAL", 0) * 10 +
+        counts.get("HIGH", 0) * 5 +
+        counts.get("MEDIUM", 0) * 2 +
+        counts.get("LOW", 0) * 1
+    )
+
+    has_critical = counts.get("CRITICAL", 0) > 0
+    has_high = counts.get("HIGH", 0) > 0
+
+    if has_critical:
+        status_icon = "⛔"
+        status_text = "BLOCKED"
+        banner = f"> ⛔ **{counts['CRITICAL']} CRITICAL finding(s) must be resolved before merging.**"
+    elif has_high:
+        status_icon = "⚠️"
+        status_text = "WARNING"
+        banner = f"> ⚠️ **No CRITICAL findings, but {counts['HIGH']} HIGH severity issue(s) need attention.**"
+    elif findings:
+        status_icon = "🟡"
+        status_text = "ADVISORY"
+        banner = "> 🟡 **No CRITICAL or HIGH findings. Review MEDIUM/LOW items below.**"
+    else:
+        status_icon = "✅"
+        status_text = "PASSED"
+        banner = "> ✅ **No significant security issues found in the changed manifests.**"
+
+    file_list = ", ".join(f"`{f}`" for f in files_scanned[:5])
+    if len(files_scanned) > 5:
+        file_list += f" +{len(files_scanned) - 5} more"
+
+    static_count = sum(1 for f in findings if f.get("source") == "static")
+    ai_count = sum(1 for f in findings if f.get("source") == "claude-ai")
+
+    lines = [
+        f"## 🛡 KubeSentinel · {status_icon} {status_text}",
+        "",
+        banner,
+        "",
+        f"**Scanned:** {file_list}  ",
+        f"**Resources:** {', '.join(kinds) or 'none'}  ",
+        f"**Findings:** {len(findings)} ({static_count} static, {ai_count} AI-identified)"
+        + (f", {len(suppressed)} suppressed" if suppressed else "") + "  ",
+        f"**Timestamp:** {now}",
+        "",
+        "| Severity | Count |",
+        "|----------|-------|",
+    ]
+    for sev, icon in SEVERITY_ICON.items():
+        lines.append(f"| {icon} {sev} | {counts.get(sev, 0)} |")
+
+    lines += ["", f"**Risk score:** {score}"]
+
+    if findings:
+        sorted_findings = sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.get("severity", "INFO"), 99))
+        detail_lines = []
+        for i, f in enumerate(sorted_findings, 1):
+            sev = f.get("severity", "INFO")
+            icon = SEVERITY_ICON.get(sev, "⚪")
+            source_badge = "[AI]" if f.get("source") == "claude-ai" else "[static]"
+            detail_lines += [
+                f"### {i}. {icon} {f.get('title', 'Untitled')} `{source_badge}`",
+                "",
+                f"| Field | Value |",
+                f"|-------|-------|",
+                f"| **Check ID** | `{f.get('check_id', 'N/A')}` |",
+                f"| **Severity** | {sev} |",
+                f"| **Resource** | `{f.get('context', 'N/A')}` |",
+            ]
+            if f.get("resource_path"):
+                detail_lines.append(f"| **Path** | `{f.get('resource_path')}` |")
+            detail_lines += [
+                "",
+                f"**What's wrong:** {f.get('detail', '')}",
+                "",
+                f"**How to fix:** {f.get('remediation', '')}",
+                "",
+            ]
+            if f.get("attack_scenario"):
+                detail_lines += [f"**Attack scenario:** {f.get('attack_scenario')}", ""]
+            detail_lines.append("---")
+            detail_lines.append("")
+
+        lines += [
+            "",
+            "<details>",
+            "<summary>📋 View all findings</summary>",
+            "",
+        ] + detail_lines + ["</details>"]
+
+    run_link = f" · [View workflow run]({run_url})" if run_url else ""
+    lines += [
+        "",
+        "---",
+        f"*[KubeSentinel](https://github.com/jaydenaung/kubesentinel) — AI-powered Kubernetes security agent{run_link}*",
+    ]
+
+    return "\n".join(lines)
+
+
 def save_report(report: str, output_path: str):
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)

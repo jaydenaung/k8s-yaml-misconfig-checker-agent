@@ -29,6 +29,14 @@ def load_manifests(path: Path) -> List[Dict]:
     return _load_from_file(path)
 
 
+def load_manifests_from_files(paths: List[Path]) -> List[Dict]:
+    """Load and parse YAML manifests from an explicit list of file paths."""
+    resources = []
+    for p in paths:
+        resources.extend(_load_from_file(p))
+    return resources
+
+
 def _load_from_file(path: Path) -> List[Dict]:
     resources = []
     with open(path, "r") as f:

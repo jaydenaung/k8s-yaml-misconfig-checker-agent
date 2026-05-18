@@ -191,10 +191,63 @@ kubesentinel/
 └── reports/                         # Output directory (gitignored)
 ```
 
-## CI/CD integration
+## PR-level manifest scanning (GitHub Actions)
+
+KubeSentinel can automatically scan Kubernetes manifests changed in a pull request,
+post findings as a PR comment, and block merge on CRITICAL findings.
+
+**Setup — copy the workflow into your repo:**
+
+```bash
+mkdir -p .github/workflows
+curl -o .github/workflows/kubesentinel.yml \
+  https://raw.githubusercontent.com/jaydenaung/kubesentinel/main/.github/workflows/kubesentinel.yml
+```
+
+**Add your API key as a GitHub Actions secret:**
+
+1. Go to your repo → Settings → Secrets and variables → Actions
+2. Add a secret named `ANTHROPIC_API_KEY`
+
+That's it. On every PR that touches a `.yaml` or `.yml` file, KubeSentinel will:
+
+1. Detect which manifests changed in the PR
+2. Run AI + static analysis on those files only
+3. Post a summary comment with a collapsible findings section
+4. Fail the check (exit 2) if CRITICAL findings are detected
+
+**What the PR comment looks like:**
+
+```
+🛡 KubeSentinel · ⛔ BLOCKED
+
+⛔ 1 CRITICAL finding must be resolved before merging.
+
+Scanned: deployment.yaml, rbac.yaml
+Findings: 5 (3 static, 2 AI-identified)
+
+| Severity | Count |
+|----------|-------|
+| 🔴 CRITICAL | 1 |
+| 🟠 HIGH | 2 |
+...
+
+📋 View all findings  ▶
+```
+
+**Without an API key** (free tier / no secret set): the scan falls back to static checks only.
+
+**CLI equivalent** (for local testing before pushing):
+
+```bash
+python agent.py --files k8s/deployment.yaml k8s/rbac.yaml --pr-comment
+python agent.py --files k8s/deployment.yaml k8s/rbac.yaml --pr-comment --output /tmp/report.md
+```
+
+## CI/CD integration (generic)
 
 ```yaml
-# GitHub Actions example
+# GitHub Actions — full repo scan on push to main
 - name: K8s security check
   run: |
     python -m pip install -r requirements.txt

@@ -1,0 +1,114 @@
+name: KubeSentinel Security Scan
+
+on:
+  pull_request:
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  kubesentinel:
+    name: Kubernetes Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install KubeSentinel
+        run: |
+          git clone https://github.com/jaydenaung/kubesentinel.git _kubesentinel
+          python -m pip install -r _kubesentinel/requirements.txt
+
+      - name: Detect changed Kubernetes manifests
+        id: changed
+        run: |
+          BASE=${{ github.base_ref }}
+          FILES=$(git diff --name-only --diff-filter=ACM origin/${BASE}...HEAD \
+            | grep -E '\.(yaml|yml)$' \
+            | grep -v '^_kubesentinel/' \
+            || true)
+
+          if [ -z "$FILES" ]; then
+            echo "No changed YAML files found."
+            echo "found=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changed YAML files:"
+            echo "$FILES"
+            # Space-separated list for --files flag
+            FILES_INLINE=$(echo "$FILES" | tr '\n' ' ' | sed 's/ $//')
+            echo "files=${FILES_INLINE}" >> $GITHUB_OUTPUT
+            echo "found=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run KubeSentinel
+        if: steps.changed.outputs.found == 'true'
+        id: scan
+        run: |
+          python _kubesentinel/agent.py \
+            --files ${{ steps.changed.outputs.files }} \
+            --pr-comment \
+            --output /tmp/kubesentinel-report.md
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        continue-on-error: true
+
+      - name: Post PR comment
+        if: steps.changed.outputs.found == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Delete any existing KubeSentinel comment to avoid duplicates
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            for (const c of comments.data) {
+              if (c.body && c.body.includes('KubeSentinel')) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: c.id,
+                });
+              }
+            }
+
+            let body;
+            try {
+              body = fs.readFileSync('/tmp/kubesentinel-report.md', 'utf8');
+            } catch (e) {
+              body = '## 🛡 KubeSentinel\n\n> ⚠️ Scan did not produce a report. Check the [workflow logs](' +
+                process.env.GITHUB_SERVER_URL + '/' + process.env.GITHUB_REPOSITORY +
+                '/actions/runs/' + process.env.GITHUB_RUN_ID + ').';
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body,
+            });
+
+      - name: No manifests changed
+        if: steps.changed.outputs.found == 'false'
+        run: echo "No Kubernetes YAML files changed in this PR — skipping scan."
+
+      - name: Fail on CRITICAL findings
+        if: steps.scan.outcome == 'failure' && steps.changed.outputs.found == 'true'
+        run: |
+          echo "::error::KubeSentinel detected CRITICAL security findings. See PR comment for details."
+          exit 2
