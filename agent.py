@@ -20,14 +20,16 @@ import argparse
 import json
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 from analyzer import load_manifests, run_static_checks
 from claude_agent import analyze_with_agent, DEFAULT_MODEL
 from reporter import render_report, save_report
 from suppressor import load_suppressions, apply_suppressions
-
-load_dotenv()
 
 
 def main():
