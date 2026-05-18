@@ -4,130 +4,136 @@
 #
 # Author: Jayden Aung
 """
-claude_agent.py — AI-powered analysis layer using Anthropic API
+claude_agent.py — Agentic analysis loop using Anthropic tool_use API
 
-Sends the manifest + static findings to Claude for:
-  - Deeper contextual analysis
-  - Supply chain risk assessment
-  - Telco/CNF-specific risk scoring
-  - Plain-English attack narrative
-  - Remediation priority ordering
+Claude drives the analysis: it decides which checks to run, which images
+to scan for CVEs, and what additional findings to report — rather than
+following a fixed pipeline.
 """
 
 import json
-import yaml
 import anthropic
-from typing import List, Dict
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+from tools import TOOLS, execute_tool
 
 
-SYSTEM_PROMPT = """You are a senior Kubernetes security architect specializing in cloud-native 
-security, telco/CNF deployments, and container security. You have deep expertise in the 
-NSA/CISA Kubernetes Hardening Guide, CIS Kubernetes Benchmark, and MITRE ATT&CK for Containers.
+SYSTEM_PROMPT = """You are a senior Kubernetes security architect with deep expertise in:
+- NSA/CISA Kubernetes Hardening Guide
+- CIS Kubernetes Benchmark
+- MITRE ATT&CK for Containers
+- Telco/CNF security (5G core, CNF sidecars, service mesh)
+- Supply chain security (image provenance, SBOMs, CVEs)
 
-When analyzing Kubernetes manifests, you:
-1. Identify security misconfigurations the static rules may have missed
-2. Assess the realistic attack impact in a telco/cloud-native context
-3. Identify supply chain and runtime risks
-4. Provide a concise, prioritized remediation plan
+You have access to tools. Use them methodically:
 
-Always respond in valid JSON only. No markdown, no prose outside the JSON structure."""
+1. Call load_manifest to parse the YAML and understand what resources are present.
+2. Run run_check with check_id='ALL' and resource_index=-1 for a full static sweep.
+3. For any container images found, call lookup_image_cves to check for known CVEs.
+4. Use report_finding for issues you identify that the static checks did not catch:
+   - Logic-level misconfigurations (e.g. overly permissive ingress, insecure inter-service trust)
+   - Supply chain risks beyond what static rules cover
+   - Missing security annotations (AppArmor, seccomp profiles)
+   - Telco/CNF-specific concerns (5G NF sidecars, service mesh misconfig, CNI risks)
+   - Combined-risk scenarios where multiple findings compound each other
+5. Call finish() when your analysis is complete.
 
-
-ANALYSIS_PROMPT = """Analyze this Kubernetes manifest for security misconfigurations.
-
-## Manifest YAML:
-{yaml_content}
-
-## Static analysis already found these issues:
-{static_findings}
-
-Respond with a JSON array of additional findings NOT already covered by static analysis.
-Each finding must follow this exact structure:
-{{
-  "source": "claude-ai",
-  "check_id": "AI-NNN",
-  "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
-  "context": "<Kind/name>",
-  "title": "<short title>",
-  "detail": "<what the problem is and why it matters>",
-  "remediation": "<specific fix>",
-  "resource_path": "<yaml path if applicable>",
-  "attack_scenario": "<one sentence describing how an attacker would exploit this>",
-  "telco_relevance": "<HIGH|MEDIUM|LOW — with one sentence explaining relevance to telco/CNF workloads>"
-}}
-
-Focus on:
-- Logic-level issues static rules can't catch (e.g. misconfigured ingress rules, insecure inter-service trust)
-- Supply chain risks in image references
-- Missing security annotations (AppArmor, seccomp)
-- Overall attack surface narrative
-- Any telco/CNF-specific concerns (5G core, CNF sidecars, service mesh misconfig)
-
-If no additional findings, return an empty array [].
-Return ONLY the JSON array. No other text."""
+Be thorough but avoid re-running checks you have already completed."""
 
 
-def analyze_with_claude(
-    resources: List[Dict],
-    static_findings: List[Dict],
-    api_key: str
-) -> List[Dict]:
-    """Send manifest and static findings to Claude for deeper analysis."""
+MAX_ITERATIONS = 25
 
+
+def analyze_with_agent(
+    manifest_path: Path,
+    api_key: str,
+    verbose: bool = True,
+) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Run the agentic analysis loop.
+    Returns (resources, findings).
+    """
     client = anthropic.Anthropic(api_key=api_key)
 
-    # Serialize resources back to YAML for Claude to read naturally
-    yaml_content = yaml.dump_all(resources, default_flow_style=False)
+    state: Dict = {
+        "resources": [],
+        "findings":  [],
+        "done":      False,
+        "summary":   "",
+    }
 
-    # Summarize static findings compactly
-    static_summary = []
-    for f in static_findings:
-        static_summary.append({
-            "check_id": f["check_id"],
-            "severity": f["severity"],
-            "title": f["title"],
-            "context": f["context"],
-        })
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"Analyze the Kubernetes manifest at '{manifest_path}' for security misconfigurations. "
+                "Be thorough: check all resources, scan container images for CVEs, and report every "
+                "finding. Call finish() when done."
+            ),
+        }
+    ]
 
-    prompt = ANALYSIS_PROMPT.format(
-        yaml_content=yaml_content,
-        static_findings=json.dumps(static_summary, indent=2)
-    )
-
-    try:
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
+    for _ in range(MAX_ITERATIONS):
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
             system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": prompt}
-            ]
+            tools=TOOLS,
+            messages=messages,
         )
 
-        response_text = message.content[0].text.strip()
+        messages.append({"role": "assistant", "content": response.content})
 
-        # Strip accidental markdown fences if present
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1])
+        if response.stop_reason == "end_turn":
+            break
 
-        findings = json.loads(response_text)
+        if response.stop_reason != "tool_use":
+            break
 
-        # Ensure all findings have required fields
-        for f in findings:
-            f.setdefault("source", "claude-ai")
-            f.setdefault("resource_path", "")
-            f.setdefault("attack_scenario", "")
-            f.setdefault("telco_relevance", "")
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                if verbose:
+                    _log_tool_call(block.name, block.input)
 
-        return findings
+                result = execute_tool(block.name, block.input, state)
 
-    except json.JSONDecodeError as e:
-        print(f"      [WARN] Could not parse Claude response as JSON: {e}")
-        return []
-    except anthropic.APIError as e:
-        print(f"      [WARN] Anthropic API error: {e}")
-        return []
-    except Exception as e:
-        print(f"      [WARN] Unexpected error during AI analysis: {e}")
-        return []
+                tool_results.append({
+                    "type":        "tool_result",
+                    "tool_use_id": block.id,
+                    "content":     json.dumps(result),
+                })
+
+        messages.append({"role": "user", "content": tool_results})
+
+        if state.get("done"):
+            break
+
+    return state["resources"], state["findings"]
+
+
+_TOOL_ICONS = {
+    "load_manifest":     "📂",
+    "run_check":         "🔍",
+    "lookup_image_cves": "🛡",
+    "report_finding":    "⚠",
+    "finish":            "✅",
+}
+
+
+def _log_tool_call(name: str, input_data: Dict) -> None:
+    icon = _TOOL_ICONS.get(name, "🔧")
+
+    if name == "run_check":
+        detail = f"check={input_data.get('check_id')}  resource={input_data.get('resource_index')}"
+    elif name == "lookup_image_cves":
+        detail = input_data.get("image", "")
+    elif name == "report_finding":
+        detail = f"[{input_data.get('severity')}] {input_data.get('title', '')}"
+    elif name == "finish":
+        detail = (input_data.get("summary") or "")[:80]
+    else:
+        detail = str(input_data)[:80]
+
+    print(f"      {icon}  {name}({detail})")

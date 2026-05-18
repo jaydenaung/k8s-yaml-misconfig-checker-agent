@@ -372,3 +372,46 @@ def check_rbac_wildcard(resource, context):
                     "rules[].resources"
                 ))
     return findings
+
+
+# ─────────────────────────────────────────────
+# Registry — used by the agent tool layer
+# ─────────────────────────────────────────────
+
+CHECK_REGISTRY = {
+    "K8S-001": check_privileged_containers,
+    "K8S-002": check_host_namespace,
+    "K8S-003": check_root_user,
+    "K8S-004": check_capabilities,
+    "K8S-005": check_read_only_root_fs,
+    "K8S-006": check_resource_limits,
+    "K8S-007": check_image_tag,
+    "K8S-008": check_service_account,
+    "K8S-009": check_host_path_volumes,
+    "K8S-010": check_network_policy,
+    "K8S-011": check_secrets_in_env,
+    "K8S-012": check_liveness_readiness,
+    "K8S-013": check_security_context,
+    "K8S-014": check_rbac_wildcard,
+}
+
+
+def run_check_by_id(check_id: str, resource: Dict) -> List[Dict]:
+    """Run a single check (or ALL) on one resource. Returns a list of findings."""
+    kind = resource.get("kind", "Unknown")
+    name = resource.get("metadata", {}).get("name", "unnamed")
+    context = f"{kind}/{name}"
+
+    if check_id == "ALL":
+        return run_static_checks([resource])
+
+    fn = CHECK_REGISTRY.get(check_id)
+    if fn is None:
+        return []
+
+    result = fn(resource, context)
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    return [result]
