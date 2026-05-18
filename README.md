@@ -27,6 +27,8 @@ Claude decides the order and depth of investigation based on what it finds.
 - **Markdown report** with severity table, risk score, and remediation priority ordering
 - **Multi-document YAML** support (multiple `---` separated resources)
 - **CI/CD friendly** — exit code `2` on CRITICAL findings
+- **40 unit tests** covering all static checks
+- **Configurable model** via `--model` flag or `K8S_CHECKER_MODEL` env var
 
 ## Quick start
 
@@ -44,6 +46,8 @@ source venv/bin/activate        # macOS/Linux
 pip install -r requirements.txt
 
 # 4. Set your Anthropic API key
+cp .env.example .env
+# Edit .env and add your key — or export it directly:
 export ANTHROPIC_API_KEY=your-key-here
 
 # 5. Run the agent
@@ -57,7 +61,21 @@ python agent.py samples/vulnerable.yaml --no-ai
 
 # Raw JSON output — useful for piping to other tools
 python agent.py samples/vulnerable.yaml --json
+
+# Use a specific model (faster/cheaper or more capable)
+python agent.py samples/vulnerable.yaml --model claude-haiku-4-5-20251001
 ```
+
+## Configuration
+
+| Method | Example |
+|--------|---------|
+| `.env` file | `ANTHROPIC_API_KEY=sk-ant-...` |
+| Environment variable | `export ANTHROPIC_API_KEY=sk-ant-...` |
+| Model override (CLI) | `--model claude-haiku-4-5-20251001` |
+| Model override (env) | `K8S_CHECKER_MODEL=claude-haiku-4-5-20251001` |
+
+Default model: `claude-sonnet-4-6`
 
 ## Optional: CVE scanning with Trivy
 
@@ -68,6 +86,15 @@ gracefully and everything else still works.
 ```bash
 brew install trivy   # macOS
 ```
+
+## Running tests
+
+```bash
+pytest tests/ -v
+```
+
+40 unit tests cover all 14 static checks — both positive (finding detected) and negative
+(no finding) cases. Tests run offline with no API key required.
 
 ## Static checks covered
 
@@ -98,10 +125,14 @@ k8s-yaml-misconfig-checker-agent/
 ├── tools.py          # Tool schemas (JSON) + execution functions
 ├── reporter.py       # Markdown report renderer
 ├── requirements.txt
+├── .env.example      # API key template — copy to .env
+├── CONTRIBUTING.md   # Guide for adding checks, tools, and tests
+├── tests/
+│   └── test_analyzer.py  # 40 unit tests for static checks
 ├── samples/
 │   ├── vulnerable.yaml   # Intentionally broken manifest — for testing
 │   └── secure.yaml       # Hardened example
-└── reports/              # Output directory for saved reports
+└── reports/              # Output directory (gitignored)
 ```
 
 ## CI/CD integration
@@ -118,14 +149,19 @@ k8s-yaml-misconfig-checker-agent/
 
 Exit codes: `0` = clean, `1` = error, `2` = CRITICAL findings detected.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add new static checks, new agent tools,
+run the test suite, and submit pull requests.
+
 ## Extending
 
 **Add a static check:** implement a function in `analyzer.py` that takes `(resource, context)`
-and returns a finding dict or `None`, then register it in `CHECK_REGISTRY`.
+and returns a finding dict or `None`, then register it in `CHECK_REGISTRY` and add tests.
 
 **Add a tool:** define its JSON schema in the `TOOLS` list in `tools.py`, add an execution
-function, and wire it into the `execute_tool` dispatcher. Claude will start using it
-automatically once it appears in the tool list.
+function, and wire it into the `execute_tool` dispatcher. Claude will start calling it
+automatically.
 
 **Tune the agent's focus:** adjust `SYSTEM_PROMPT` in `claude_agent.py` to bias Claude
 toward specific workload types — 5G core NFs, CNF sidecars, service mesh, DPDK, etc.
