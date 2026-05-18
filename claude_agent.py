@@ -21,6 +21,9 @@ from tools import TOOLS, execute_tool
 
 DEFAULT_MODEL = os.environ.get("K8S_CHECKER_MODEL", "claude-sonnet-4-6")
 
+# NOTE: Prompt injection risk — malicious YAML files could embed text attempting to
+# override these instructions. The tool_use API reduces (but does not eliminate) this
+# risk. Never load YAML from untrusted sources without reviewing it first.
 SYSTEM_PROMPT = """You are a senior Kubernetes security architect with deep expertise in:
 - NSA/CISA Kubernetes Hardening Guide
 - CIS Kubernetes Benchmark

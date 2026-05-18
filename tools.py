@@ -259,10 +259,29 @@ def _render_helm_chart(input_data: Dict, state: Dict) -> Dict:
         return {"error": str(e)}
 
 
+_ALLOWED_RESOURCE_TYPES = {
+    "pods", "deployments", "daemonsets", "statefulsets", "replicasets", "jobs", "cronjobs",
+    "services", "endpoints", "ingresses",
+    "configmaps", "secrets", "serviceaccounts",
+    "networkpolicies",
+    "roles", "rolebindings", "clusterroles", "clusterrolebindings",
+    "namespaces", "nodes", "persistentvolumes", "persistentvolumeclaims",
+    "resourcequotas", "limitranges", "podsecuritypolicies", "poddisruptionbudgets",
+}
+
+
 def _query_cluster(input_data: Dict, state: Dict) -> Dict:
-    resource_type = input_data["resource_type"]
+    resource_type = input_data["resource_type"].lower().strip()
     name = input_data.get("name", "")
     namespace = input_data.get("namespace", "")
+
+    if resource_type not in _ALLOWED_RESOURCE_TYPES:
+        return {
+            "error": (
+                f"Resource type '{resource_type}' is not in the allowed list. "
+                f"Allowed types: {sorted(_ALLOWED_RESOURCE_TYPES)}"
+            )
+        }
 
     cmd = ["kubectl", "get", resource_type]
     if name:
