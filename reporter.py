@@ -22,7 +22,13 @@ SEVERITY_ICON = {
 }
 
 
-def render_report(filename: str, resources: List[Dict], findings: List[Dict]) -> str:
+def render_report(
+    filename: str,
+    resources: List[Dict],
+    findings: List[Dict],
+    suppressed: List[Dict] = None,
+) -> str:
+    suppressed = suppressed or []
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     kinds = [r.get("kind", "Unknown") for r in resources]
 
@@ -38,6 +44,10 @@ def render_report(filename: str, resources: List[Dict], findings: List[Dict]) ->
     static_count = sum(1 for f in findings if f.get("source") == "static")
     ai_count = sum(1 for f in findings if f.get("source") == "claude-ai")
 
+    finding_summary = f"{len(findings)} ({static_count} static, {ai_count} AI-identified)"
+    if suppressed:
+        finding_summary += f", {len(suppressed)} suppressed"
+
     lines = []
 
     # Header
@@ -47,7 +57,7 @@ def render_report(filename: str, resources: List[Dict], findings: List[Dict]) ->
         f"**File:** `{filename}`  ",
         f"**Scanned:** {now}  ",
         f"**Resources:** {', '.join(kinds)}  ",
-        f"**Total findings:** {len(findings)} ({static_count} static, {ai_count} AI-identified)",
+        f"**Total findings:** {finding_summary}",
         f"",
     ]
 
@@ -156,6 +166,17 @@ def render_report(filename: str, resources: List[Dict], findings: List[Dict]) ->
             for f in highs:
                 lines.append(f"- {f.get('title')} — `{f.get('context')}`")
             lines.append("")
+
+    # Suppressed findings
+    if suppressed:
+        lines += ["## Suppressed findings", ""]
+        lines.append("The following findings were suppressed by `.k8s-checker-ignore.yaml`:\n")
+        for f in suppressed:
+            reason = f.get("suppressed_reason", "no reason given")
+            sev = f.get("severity", "INFO")
+            icon = SEVERITY_ICON.get(sev, "⚪")
+            lines.append(f"- {icon} `{f.get('check_id')}` **{f.get('title')}** — `{f.get('context')}` *(reason: {reason})*")
+        lines.append("")
 
     lines += [
         "---",

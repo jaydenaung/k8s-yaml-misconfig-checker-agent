@@ -19,14 +19,35 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 
+_EXCLUDE_DIRS = {".git", "venv", "node_modules", "__pycache__", ".tox", ".mypy_cache"}
+
+
 def load_manifests(path: Path) -> List[Dict]:
-    """Load and parse a YAML file that may contain multiple documents."""
+    """Load and parse YAML manifests from a file or directory."""
+    if path.is_dir():
+        return _load_from_dir(path)
+    return _load_from_file(path)
+
+
+def _load_from_file(path: Path) -> List[Dict]:
     resources = []
     with open(path, "r") as f:
-        docs = list(yaml.safe_load_all(f))
-    for doc in docs:
-        if doc is not None:
-            resources.append(doc)
+        for doc in yaml.safe_load_all(f):
+            if doc is not None:
+                doc["_source_file"] = str(path)
+                resources.append(doc)
+    return resources
+
+
+def _load_from_dir(path: Path) -> List[Dict]:
+    files = set()
+    for ext in ("*.yaml", "*.yml"):
+        for f in path.rglob(ext):
+            if not any(part in _EXCLUDE_DIRS for part in f.parts):
+                files.add(f)
+    resources = []
+    for f in sorted(files):
+        resources.extend(_load_from_file(f))
     return resources
 
 

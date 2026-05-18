@@ -8,7 +8,8 @@ K8s YAML Misconfiguration Checker Agent by Jayden Aung
 
 Usage:
     python agent.py <manifest.yaml>
-    python agent.py samples/vulnerable.yaml
+    python agent.py <directory/>
+    python agent.py <helm-chart/>
     python agent.py samples/vulnerable.yaml --output reports/result.md
     python agent.py samples/vulnerable.yaml --no-ai
 """
@@ -24,6 +25,7 @@ from dotenv import load_dotenv
 from analyzer import load_manifests, run_static_checks
 from claude_agent import analyze_with_agent, DEFAULT_MODEL
 from reporter import render_report, save_report
+from suppressor import load_suppressions, apply_suppressions
 
 load_dotenv()
 
@@ -32,7 +34,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="K8s YAML Misconfiguration Checker — AI security agent"
     )
-    parser.add_argument("manifest", help="Path to Kubernetes YAML manifest file")
+    parser.add_argument(
+        "manifest",
+        help="Path to a Kubernetes YAML file, a directory of manifests, or a Helm chart directory"
+    )
     parser.add_argument(
         "--output", "-o",
         help="Save report to file (e.g. reports/result.md)",
@@ -50,22 +55,30 @@ def main():
     )
     parser.add_argument(
         "--model",
-        help="Claude model to use (overrides K8S_CHECKER_MODEL env var)",
+        help=f"Claude model to use (default: {DEFAULT_MODEL}, or set K8S_CHECKER_MODEL env var)",
         default=None,
     )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest)
     if not manifest_path.exists():
-        print(f"[ERROR] File not found: {manifest_path}")
+        print(f"[ERROR] Path not found: {manifest_path}")
         sys.exit(1)
 
+    is_helm = manifest_path.is_dir() and (manifest_path / "Chart.yaml").exists()
+    is_dir  = manifest_path.is_dir() and not is_helm
+
+    label = "Helm chart" if is_helm else ("directory" if is_dir else "manifest")
     print(f"\n  K8s Misconfiguration Checker — Agent Mode")
-    print(f"  Analyzing: {manifest_path.name}\n")
+    print(f"  Analyzing {label}: {manifest_path}\n")
+
+    # Load suppression rules from .k8s-checker-ignore.yaml
+    suppressions = load_suppressions(manifest_path if manifest_path.is_dir() else manifest_path.parent)
+    if suppressions:
+        print(f"  Suppression rules loaded: {len(suppressions)} rule(s)\n")
 
     if args.no_ai:
-        # Static-only path
-        print("[1/2] Parsing manifest...")
+        print("[1/2] Loading manifests...")
         resources = load_manifests(manifest_path)
         print(f"      Found {len(resources)} resource(s): {[r.get('kind', 'Unknown') for r in resources]}")
 
@@ -78,6 +91,7 @@ def main():
         if not api_key:
             print("[ERROR] ANTHROPIC_API_KEY not set.")
             print("        Set it with: export ANTHROPIC_API_KEY=your-key-here")
+            print("        Or add it to a .env file in this directory.")
             sys.exit(1)
 
         model = args.model or os.environ.get("K8S_CHECKER_MODEL")
@@ -90,11 +104,16 @@ def main():
         print(f"\n      {len(findings)} total finding(s)  "
               f"({static_count} static, {ai_count} AI-identified)")
 
+    # Apply suppressions
+    findings, suppressed = apply_suppressions(findings, suppressions)
+    if suppressed:
+        print(f"      {len(suppressed)} finding(s) suppressed by .k8s-checker-ignore.yaml")
+
     if args.json:
         print(json.dumps(findings, indent=2))
         return
 
-    report = render_report(manifest_path.name, resources, findings)
+    report = render_report(manifest_path.name, resources, findings, suppressed=suppressed)
     print("\n" + "─" * 60)
     print(report)
     print("─" * 60)

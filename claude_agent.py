@@ -28,18 +28,35 @@ SYSTEM_PROMPT = """You are a senior Kubernetes security architect with deep expe
 - Telco/CNF security (5G core, CNF sidecars, service mesh)
 - Supply chain security (image provenance, SBOMs, CVEs)
 
-You have access to tools. Use them methodically:
+You have access to the following tools. Use them methodically:
 
-1. Call load_manifest to parse the YAML and understand what resources are present.
-2. Run run_check with check_id='ALL' and resource_index=-1 for a full static sweep.
-3. For any container images found, call lookup_image_cves to check for known CVEs.
-4. Use report_finding for issues you identify that the static checks did not catch:
-   - Logic-level misconfigurations (e.g. overly permissive ingress, insecure inter-service trust)
-   - Supply chain risks beyond what static rules cover
-   - Missing security annotations (AppArmor, seccomp profiles)
-   - Telco/CNF-specific concerns (5G NF sidecars, service mesh misconfig, CNI risks)
-   - Combined-risk scenarios where multiple findings compound each other
-5. Call finish() when your analysis is complete.
+**Loading manifests:**
+- If the input is a regular YAML file or directory: call load_manifest (handles both automatically)
+- If the input is a Helm chart directory (contains Chart.yaml): call render_helm_chart first
+
+**Static analysis:**
+- Run run_check with check_id='ALL' and resource_index=-1 for a full sweep of all loaded resources
+
+**CVE scanning:**
+- For every unique container image found, call lookup_image_cves
+
+**Live cluster analysis (if kubectl is available):**
+- Call query_cluster to inspect the running state: pods, RBAC bindings, NetworkPolicies, Secrets
+- Compare declared (manifest) vs runtime state for drift
+- Check namespace-wide RBAC: clusterrolebindings, rolebindings
+- Look for pods with no NetworkPolicy coverage across namespaces
+
+**AI findings:**
+- Use report_finding for issues the static checks did not catch:
+  - Logic-level misconfigurations (insecure inter-service trust, permissive ingress)
+  - Supply chain risks beyond static rules
+  - Missing AppArmor / seccomp annotations
+  - Telco/CNF concerns (5G NF sidecars, service mesh misconfig, DPDK, CNI)
+  - Compound-risk chains where multiple findings amplify each other
+  - Runtime vs declared state mismatches
+
+**Finishing:**
+- Call finish() when analysis is complete
 
 Be thorough but avoid re-running checks you have already completed."""
 
@@ -67,13 +84,26 @@ def analyze_with_agent(
         "summary":   "",
     }
 
+    if manifest_path.is_dir() and (manifest_path / "Chart.yaml").exists():
+        input_hint = (
+            f"'{manifest_path}' is a Helm chart directory. "
+            "Use render_helm_chart to render it before running checks."
+        )
+    elif manifest_path.is_dir():
+        input_hint = (
+            f"'{manifest_path}' is a directory. "
+            "Call load_manifest with this directory path — it will automatically load all YAML files inside."
+        )
+    else:
+        input_hint = f"'{manifest_path}' is a YAML file. Call load_manifest to parse it."
+
     messages = [
         {
             "role": "user",
             "content": (
-                f"Analyze the Kubernetes manifest at '{manifest_path}' for security misconfigurations. "
-                "Be thorough: check all resources, scan container images for CVEs, and report every "
-                "finding. Call finish() when done."
+                f"Analyze '{manifest_path}' for Kubernetes security misconfigurations. {input_hint} "
+                "Be thorough: run all static checks, scan container images for CVEs, query the live "
+                "cluster if kubectl is available, and report every finding. Call finish() when done."
             ),
         }
     ]
@@ -119,6 +149,8 @@ def analyze_with_agent(
 
 _TOOL_ICONS = {
     "load_manifest":     "📂",
+    "render_helm_chart": "⎈",
+    "query_cluster":     "🌐",
     "run_check":         "🔍",
     "lookup_image_cves": "🛡",
     "report_finding":    "⚠",

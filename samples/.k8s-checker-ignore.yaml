@@ -1,0 +1,18 @@
+# .k8s-checker-ignore.yaml
+# Place this file next to your manifest (or in the project root) to suppress known/accepted findings.
+#
+# Each rule requires check_id. Optionally specify resource (Kind/name) to scope it.
+# Always add a reason so the suppression is auditable.
+#
+# Example:
+suppress:
+  - check_id: K8S-008
+    resource: Deployment/legacy-api
+    reason: "Migrating off auto-mounted SA tokens in Q3 2026 — tracked in JIRA-1234"
+
+  - check_id: K8S-007
+    reason: "Internal registry enforces immutable tags at push time — :latest always resolves to a pinned digest"
+
+  - check_id: K8S-012
+    resource: Deployment/batch-worker
+    reason: "Batch job — no HTTP endpoint for probes; uses job completion as health signal"
