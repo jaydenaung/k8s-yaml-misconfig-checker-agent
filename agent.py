@@ -19,9 +19,13 @@ import argparse
 import json
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from analyzer import load_manifests, run_static_checks
-from claude_agent import analyze_with_agent
+from claude_agent import analyze_with_agent, DEFAULT_MODEL
 from reporter import render_report, save_report
+
+load_dotenv()
 
 
 def main():
@@ -43,6 +47,11 @@ def main():
         "--no-ai",
         help="Run static checks only, skip the Claude agent",
         action="store_true",
+    )
+    parser.add_argument(
+        "--model",
+        help="Claude model to use (overrides K8S_CHECKER_MODEL env var)",
+        default=None,
     )
     args = parser.parse_args()
 
@@ -71,8 +80,11 @@ def main():
             print("        Set it with: export ANTHROPIC_API_KEY=your-key-here")
             sys.exit(1)
 
+        model = args.model or os.environ.get("K8S_CHECKER_MODEL")
         print("[agent] Claude is driving the analysis...\n")
-        resources, findings = analyze_with_agent(manifest_path, api_key, verbose=True)
+        resources, findings = analyze_with_agent(
+            manifest_path, api_key, verbose=True, model=model
+        )
         static_count = sum(1 for f in findings if f.get("source") == "static")
         ai_count     = sum(1 for f in findings if f.get("source") == "claude-ai")
         print(f"\n      {len(findings)} total finding(s)  "

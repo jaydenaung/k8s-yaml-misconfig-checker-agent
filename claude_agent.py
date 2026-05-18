@@ -12,12 +12,14 @@ following a fixed pipeline.
 """
 
 import json
+import os
 import anthropic
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 from tools import TOOLS, execute_tool
 
+DEFAULT_MODEL = os.environ.get("K8S_CHECKER_MODEL", "claude-sonnet-4-6")
 
 SYSTEM_PROMPT = """You are a senior Kubernetes security architect with deep expertise in:
 - NSA/CISA Kubernetes Hardening Guide
@@ -49,12 +51,14 @@ def analyze_with_agent(
     manifest_path: Path,
     api_key: str,
     verbose: bool = True,
+    model: str = None,
 ) -> Tuple[List[Dict], List[Dict]]:
     """
     Run the agentic analysis loop.
     Returns (resources, findings).
     """
     client = anthropic.Anthropic(api_key=api_key)
+    model = model or DEFAULT_MODEL
 
     state: Dict = {
         "resources": [],
@@ -76,7 +80,7 @@ def analyze_with_agent(
 
     for _ in range(MAX_ITERATIONS):
         response = client.messages.create(
-            model="claude-sonnet-4-6",
+            model=model,
             max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
