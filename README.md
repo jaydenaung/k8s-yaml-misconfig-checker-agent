@@ -1,19 +1,21 @@
 # K8s YAML Misconfiguration Checker Agent by Jayden Aung
 
 A true AI security agent for Kubernetes manifests. Claude drives the analysis using the
-Anthropic tool_use API — deciding which checks to run, scanning images for CVEs, and
-identifying compound risk scenarios that static rules alone cannot catch.
+Anthropic tool_use API — deciding which checks to run, scanning images for CVEs, querying
+live clusters, and identifying compound risk scenarios that static rules alone cannot catch.
 
 ## How it works
 
 Instead of a fixed pipeline, Claude acts as an autonomous agent with tools:
 
 ```
-📂 load_manifest      → parse the YAML, discover resources
-🔍 run_check          → run static security checks (individual or all 14)
-🛡 lookup_image_cves  → scan container images for CVEs via Trivy
-⚠  report_finding     → record AI-identified findings
-✅ finish             → end analysis, emit report
+📂 load_manifest       → parse a YAML file or entire directory of manifests
+⎈  render_helm_chart   → render a Helm chart via helm template, then analyze
+🌐 query_cluster       → inspect a live cluster: pods, RBAC, NetworkPolicies, Secrets
+🔍 run_check           → run static security checks (individual or all 14)
+🛡 lookup_image_cves   → scan container images for CVEs via Trivy
+⚠  report_finding      → record AI-identified findings
+✅ finish              → end analysis, emit report
 ```
 
 Claude decides the order and depth of investigation based on what it finds.
@@ -22,12 +24,15 @@ Claude decides the order and depth of investigation based on what it finds.
 
 - **Agentic loop** — Claude calls tools iteratively, not a one-shot prompt
 - **14 static checks** covering CIS Benchmark, NSA/CISA hardening guide, OWASP K8s Top 10
+- **Live cluster analysis** — inspect running pods, RBAC bindings, and NetworkPolicies via `kubectl`
+- **Directory scanning** — scan an entire folder of manifests in one command
+- **Helm chart support** — render charts with `helm template` before analysis
 - **CVE scanning** via Trivy for container images (optional)
+- **Suppression allowlist** — acknowledge accepted risks with `.k8s-checker-ignore.yaml`
 - **AI-identified findings** — logic-level issues, compound risk chains, telco/CNF-specific concerns
 - **Markdown report** with severity table, risk score, and remediation priority ordering
-- **Multi-document YAML** support (multiple `---` separated resources)
 - **CI/CD friendly** — exit code `2` on CRITICAL findings
-- **40 unit tests** covering all static checks
+- **48 unit tests** covering all static checks and suppression logic
 - **Configurable model** via `--model` flag or `K8S_CHECKER_MODEL` env var
 
 ## Quick start
@@ -51,9 +56,9 @@ cp .env.example .env
 export ANTHROPIC_API_KEY=your-key-here
 
 # 5. Run the agent
-python agent.py samples/vulnerable.yaml
-
-# Save the report to a file
+python agent.py samples/vulnerable.yaml          # single file
+python agent.py k8s/                             # entire directory
+python agent.py ./my-helm-chart/                 # Helm chart
 python agent.py samples/vulnerable.yaml --output reports/result.md
 
 # Static checks only — no API key required
@@ -62,7 +67,7 @@ python agent.py samples/vulnerable.yaml --no-ai
 # Raw JSON output — useful for piping to other tools
 python agent.py samples/vulnerable.yaml --json
 
-# Use a specific model (faster/cheaper or more capable)
+# Use a specific model
 python agent.py samples/vulnerable.yaml --model claude-haiku-4-5-20251001
 ```
 
@@ -77,11 +82,58 @@ python agent.py samples/vulnerable.yaml --model claude-haiku-4-5-20251001
 
 Default model: `claude-sonnet-4-6`
 
+## Suppressing known / accepted findings
+
+Create a `.k8s-checker-ignore.yaml` file next to your manifest (or in the project root)
+to silence findings your team has reviewed and accepted. Suppressed findings still appear
+in the report footer with their reasons for auditability.
+
+```yaml
+# .k8s-checker-ignore.yaml
+suppress:
+  - check_id: K8S-008
+    resource: Deployment/legacy-api
+    reason: "Migrating off auto-mounted SA tokens in Q3 2026 — JIRA-1234"
+
+  - check_id: K8S-007
+    reason: "Internal registry enforces immutable tags at push time"
+
+  - check_id: K8S-012
+    resource: Deployment/batch-worker
+    reason: "Batch job — uses job completion as health signal, no HTTP endpoint"
+```
+
+See `samples/.k8s-checker-ignore.yaml` for a full annotated example.
+
+## Live cluster analysis
+
+If `kubectl` is configured and connected to a cluster, the agent will automatically
+query runtime state alongside the static manifest analysis:
+
+- Running pods and their security contexts
+- RBAC bindings (Roles, ClusterRoles, RoleBindings, ClusterRoleBindings)
+- NetworkPolicies per namespace
+- Secrets (names and types only — values are never read)
+
+No additional setup is required. If `kubectl` is not available or no cluster is connected,
+this step is skipped gracefully.
+
+## Helm chart support
+
+Point the agent at a directory containing `Chart.yaml` and it will automatically run
+`helm template` to render the manifests before analysis:
+
+```bash
+python agent.py ./my-helm-chart/
+python agent.py ./my-helm-chart/ --output reports/helm-scan.md
+```
+
+Requires [Helm](https://helm.sh/docs/intro/install/) to be installed. Falls back gracefully if not available.
+
 ## Optional: CVE scanning with Trivy
 
-If [Trivy](https://aquasecurity.github.io/trivy/) is installed, the agent will
-automatically scan container images for known CVEs. Without it, that step is skipped
-gracefully and everything else still works.
+If [Trivy](https://aquasecurity.github.io/trivy/) is installed, the agent will scan
+container images for known CVEs. Without it, that step is skipped gracefully.
 
 ```bash
 brew install trivy   # macOS
@@ -93,8 +145,8 @@ brew install trivy   # macOS
 pytest tests/ -v
 ```
 
-40 unit tests cover all 14 static checks — both positive (finding detected) and negative
-(no finding) cases. Tests run offline with no API key required.
+48 unit tests cover all 14 static checks and the suppression allowlist logic.
+All tests run offline — no API key or cluster connection required.
 
 ## Static checks covered
 
@@ -119,20 +171,23 @@ pytest tests/ -v
 
 ```
 k8s-yaml-misconfig-checker-agent/
-├── agent.py          # Entry point — CLI arg parsing, orchestration
-├── analyzer.py       # YAML parser, static checks, CHECK_REGISTRY
-├── claude_agent.py   # Agentic loop using Anthropic tool_use API
-├── tools.py          # Tool schemas (JSON) + execution functions
-├── reporter.py       # Markdown report renderer
+├── agent.py            # Entry point — CLI arg parsing, orchestration
+├── analyzer.py         # YAML parser, static checks, CHECK_REGISTRY
+├── claude_agent.py     # Agentic loop using Anthropic tool_use API
+├── tools.py            # Tool schemas (JSON) + execution functions
+├── reporter.py         # Markdown report renderer
+├── suppressor.py       # Suppression allowlist loader and filter
 ├── requirements.txt
-├── .env.example      # API key template — copy to .env
-├── CONTRIBUTING.md   # Guide for adding checks, tools, and tests
+├── .env.example        # API key template — copy to .env
+├── CONTRIBUTING.md     # Guide for adding checks, tools, and tests
 ├── tests/
-│   └── test_analyzer.py  # 40 unit tests for static checks
+│   ├── test_analyzer.py    # 40 unit tests for static checks
+│   └── test_suppressor.py  # 8 unit tests for suppression logic
 ├── samples/
-│   ├── vulnerable.yaml   # Intentionally broken manifest — for testing
-│   └── secure.yaml       # Hardened example
-└── reports/              # Output directory (gitignored)
+│   ├── vulnerable.yaml              # Intentionally broken manifest — for testing
+│   ├── secure.yaml                  # Hardened example
+│   └── .k8s-checker-ignore.yaml    # Example suppression config
+└── reports/                         # Output directory (gitignored)
 ```
 
 ## CI/CD integration
@@ -142,7 +197,7 @@ k8s-yaml-misconfig-checker-agent/
 - name: K8s security check
   run: |
     pip install -r requirements.txt
-    python agent.py k8s/deployment.yaml --output reports/security.md
+    python agent.py k8s/ --output reports/security.md
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
