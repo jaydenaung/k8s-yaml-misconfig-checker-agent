@@ -214,6 +214,42 @@ def _persist_findings(db, scan: Scan, findings: List[Dict]) -> None:
     scan.info_count     = counts.get("INFO", 0)
 
 
+def _trivy_scan(image_ref: str) -> Dict:
+    """Run Trivy against a single image. Returns CVE counts or empty dict if unavailable."""
+    try:
+        result = subprocess.run(
+            ["trivy", "image", "--format", "json", "--quiet", "--no-progress", image_ref],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode not in (0, 1):
+            return {}
+        data = json.loads(result.stdout)
+        counts: Dict[str, int] = {}
+        top_critical = []
+        for res in data.get("Results", []):
+            for v in res.get("Vulnerabilities") or []:
+                sev = v.get("Severity", "UNKNOWN")
+                counts[sev] = counts.get(sev, 0) + 1
+                if sev == "CRITICAL" and len(top_critical) < 5:
+                    top_critical.append({
+                        "id":      v.get("VulnerabilityID"),
+                        "package": v.get("PkgName"),
+                        "fixed":   v.get("FixedVersion"),
+                    })
+        return {
+            "critical": counts.get("CRITICAL", 0),
+            "high":     counts.get("HIGH", 0),
+            "medium":   counts.get("MEDIUM", 0),
+            "low":      counts.get("LOW", 0),
+            "total":    sum(counts.values()),
+            "details":  json.dumps(top_critical),
+        }
+    except FileNotFoundError:
+        return {}  # Trivy not installed — skip silently
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return {}
+
+
 def _extract_images(db, scan: Scan, resources: List[Dict]) -> None:
     seen: set = set()
     for r in resources:
@@ -227,4 +263,14 @@ def _extract_images(db, scan: Scan, resources: List[Dict]) -> None:
             img = c.get("image")
             if img and img not in seen:
                 seen.add(img)
-                db.add(Image(scan_id=scan.id, image_ref=img))
+                cves = _trivy_scan(img)
+                db.add(Image(
+                    scan_id=scan.id,
+                    image_ref=img,
+                    critical_cves=cves.get("critical", 0),
+                    high_cves=cves.get("high", 0),
+                    medium_cves=cves.get("medium", 0),
+                    low_cves=cves.get("low", 0),
+                    total_cves=cves.get("total", 0),
+                    cve_details=cves.get("details"),
+                ))
