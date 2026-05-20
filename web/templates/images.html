@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Images — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Container Images</div>
+    <div class="page-subtitle">Images detected across all scans and their CVE counts</div>
+  </div>
+</div>
+
+<div class="card">
+  {% if images %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Image</th>
+          <th>Detected in</th>
+          <th>Critical CVEs</th>
+          <th>High CVEs</th>
+          <th>Medium CVEs</th>
+          <th>Low CVEs</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for img in images %}
+        <tr>
+          <td class="font-mono">{{ img.image_ref }}</td>
+          <td class="text-muted">{{ scan_map.get(img.scan_id, '—') }}</td>
+          <td>{% if img.critical_cves %}<span class="badge badge-critical">{{ img.critical_cves }}</span>{% else %}—{% endif %}</td>
+          <td>{% if img.high_cves %}<span class="badge badge-high">{{ img.high_cves }}</span>{% else %}—{% endif %}</td>
+          <td>{% if img.medium_cves %}<span class="badge badge-medium">{{ img.medium_cves }}</span>{% else %}—{% endif %}</td>
+          <td>{% if img.low_cves %}<span class="badge badge-low">{{ img.low_cves }}</span>{% else %}—{% endif %}</td>
+          <td class="text-muted">{{ img.total_cves or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="form-hint" style="margin-top:12px">CVE counts are populated when Trivy is installed. Install with <code>brew install trivy</code> (macOS) or see <a href="https://aquasecurity.github.io/trivy/" style="color:#3b82f6">trivy docs</a>.</p>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">📦</div>
+    <h3>No images detected yet</h3>
+    <p>Scan a manifest to detect container images.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

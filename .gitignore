@@ -19,6 +19,9 @@ build/
 # Reports output (generated — don't commit)
 reports/
 
+# Web server runtime data (DB, uploads, kubeconfigs, session key — never commit)
+data/
+
 # macOS
 .DS_Store
 .AppleDouble

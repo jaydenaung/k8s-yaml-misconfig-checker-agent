@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Scan #{{ scan.id }} — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Scan #{{ scan.id }}</div>
+    <div class="page-subtitle">
+      {{ scan.target_name }} · {{ scan.scan_type }} ·
+      <span class="badge badge-{{ scan.scan_mode }}">{{ scan.scan_mode }}</span>
+      <span class="badge badge-{{ scan.status }}">{{ scan.status }}</span>
+      {% if scan.triggered_by %} · by {{ scan.triggered_by }}{% endif %}
+    </div>
+  </div>
+  <a href="javascript:history.back()" class="btn btn-secondary">← Back</a>
+</div>
+
+{% if scan.status in ('queued', 'running') %}
+<div class="alert alert-info">
+  <span class="spinner"></span> Scan in progress — <a href="" onclick="location.reload();return false">refresh</a> to see results.
+</div>
+{% elif scan.status == 'failed' %}
+<div class="alert alert-error">Scan failed: {{ scan.error_message or 'Unknown error' }}</div>
+{% endif %}
+
+{% if findings %}
+<div class="card" style="padding:0">
+  <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9" class="flex items-center gap-3">
+    <span class="card-title" style="margin:0">{{ findings|length }} findings</span>
+    {% if scan.critical_count %}<span class="badge badge-critical">{{ scan.critical_count }} Critical</span>{% endif %}
+    {% if scan.high_count %}<span class="badge badge-high">{{ scan.high_count }} High</span>{% endif %}
+    {% if scan.medium_count %}<span class="badge badge-medium">{{ scan.medium_count }} Medium</span>{% endif %}
+    {% if scan.low_count %}<span class="badge badge-low">{{ scan.low_count }} Low</span>{% endif %}
+  </div>
+  <div style="padding:16px 20px">
+    {% for f in findings %}
+    <div class="finding {{ f.severity }}">
+      <div class="finding-header">
+        <div class="finding-title">{{ f.title }}</div>
+        <span class="badge badge-{{ f.severity|lower }}">{{ f.severity }}</span>
+        <span class="badge badge-{{ f.source|replace('claude-ai','ai') }}">{{ f.source }}</span>
+      </div>
+      <div class="finding-meta">
+        <span><code>{{ f.check_id }}</code></span>
+        <span>{{ f.context }}</span>
+        {% if f.resource_path %}<span class="font-mono">{{ f.resource_path }}</span>{% endif %}
+      </div>
+      <div class="finding-detail">{{ f.detail }}</div>
+      <div class="finding-fix">🔧 {{ f.remediation }}</div>
+      {% if f.attack_scenario %}
+      <div class="finding-scenario">⚡ {{ f.attack_scenario }}</div>
+      {% endif %}
+      {% if f.telco_relevance %}
+      <div class="finding-scenario" style="color:#0284c7;background:#e0f2fe">📡 {{ f.telco_relevance }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% elif scan.status == 'done' %}
+<div class="card">
+  <div class="empty"><div class="empty-icon">✅</div><h3>No findings</h3><p>Clean scan — no misconfigurations detected.</p></div>
+</div>
+{% endif %}
+{% endblock %}

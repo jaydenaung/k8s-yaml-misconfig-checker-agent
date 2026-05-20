@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Clusters — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Clusters</div>
+    <div class="page-subtitle">Onboard and scan live Kubernetes clusters</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Onboard a Cluster</div>
+  <form method="post" action="/clusters/onboard" enctype="multipart/form-data">
+    <div class="flex gap-3" style="flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="width:200px;margin-bottom:0">
+        <label class="form-label">Cluster Name</label>
+        <input type="text" name="name" placeholder="prod-us-east-1" required class="form-control">
+      </div>
+      <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0">
+        <label class="form-label">Kubeconfig File</label>
+        <input type="file" name="file" accept=".yaml,.yml,.conf" required class="form-control">
+      </div>
+      <button type="submit" class="btn btn-primary">Onboard Cluster</button>
+    </div>
+    <p class="form-hint" style="margin-top:8px">Kubeconfig is stored securely on the server with restricted permissions (chmod 600). Values are never exposed.</p>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Onboarded Clusters</div>
+  {% if cluster_data %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Added by</th>
+          <th>Last scan</th>
+          <th>Schedule</th>
+          <th>Status</th>
+          <th>C</th><th>H</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in cluster_data %}
+        {% set c = item.cluster %}
+        {% set s = item.latest_scan %}
+        <tr>
+          <td><a href="/clusters/{{ c.id }}" class="td-link">{{ c.name }}</a></td>
+          <td class="text-muted">{{ c.added_by_name or '—' }}</td>
+          <td class="text-muted">{% if c.last_scanned_at %}{{ c.last_scanned_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}</td>
+          <td class="text-muted">{% if c.schedule_hours > 0 %}Every {{ c.schedule_hours }}h{% else %}Manual{% endif %}</td>
+          <td>
+            {% if s %}
+            <span class="badge badge-{{ s.status }}">
+              {% if s.status == 'running' %}<span class="spinner"></span> {% endif %}
+              {{ s.status }}
+            </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{% if s and s.critical_count %}<span class="badge badge-critical">{{ s.critical_count }}</span>{% else %}—{% endif %}</td>
+          <td>{% if s and s.high_count %}<span class="badge badge-high">{{ s.high_count }}</span>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">⎈</div>
+    <h3>No clusters onboarded</h3>
+    <p>Upload a kubeconfig above to onboard your first cluster.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

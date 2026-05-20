@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ manifest.filename }} — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">{{ manifest.filename }}</div>
+    <div class="page-subtitle">Uploaded by {{ manifest.uploaded_by_name or 'unknown' }}</div>
+  </div>
+  <a href="/manifests" class="btn btn-secondary">← Back</a>
+</div>
+
+{% if latest_scan and latest_scan.status in ('queued', 'running') %}
+<div class="alert alert-info" id="scan-status-banner">
+  <span class="spinner"></span>
+  Scan #{{ latest_scan.id }} is <strong>{{ latest_scan.status }}</strong> — results will appear automatically.
+</div>
+<script>
+(function poll() {
+  setTimeout(function() {
+    fetch('/api/scans/{{ latest_scan.id }}/status')
+      .then(r => r.json())
+      .then(d => {
+        if (d.status === 'done' || d.status === 'failed') { location.reload(); }
+        else { poll(); }
+      }).catch(poll);
+  }, 3000);
+})();
+</script>
+{% endif %}
+
+{% if latest_scan and latest_scan.status == 'failed' %}
+<div class="alert alert-error">Scan failed: {{ latest_scan.error_message or 'Unknown error' }}</div>
+{% endif %}
+
+<div class="flex gap-4" style="flex-wrap:wrap;align-items:flex-start">
+  <!-- Findings panel -->
+  <div style="flex:1;min-width:320px">
+    {% if findings %}
+    <div class="card" style="padding:0">
+      <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9" class="flex items-center justify-between">
+        <span class="card-title" style="margin:0">Findings ({{ findings|length }})</span>
+        <div class="flex gap-2">
+          {% if latest_scan.critical_count %}<span class="badge badge-critical">{{ latest_scan.critical_count }} C</span>{% endif %}
+          {% if latest_scan.high_count %}<span class="badge badge-high">{{ latest_scan.high_count }} H</span>{% endif %}
+          {% if latest_scan.medium_count %}<span class="badge badge-medium">{{ latest_scan.medium_count }} M</span>{% endif %}
+          {% if latest_scan.low_count %}<span class="badge badge-low">{{ latest_scan.low_count }} L</span>{% endif %}
+        </div>
+      </div>
+      <div style="padding:16px 20px">
+        {% for f in findings %}
+        <div class="finding {{ f.severity }}">
+          <div class="finding-header">
+            <div class="finding-title">{{ f.title }}</div>
+            <span class="badge badge-{{ f.severity|lower }}">{{ f.severity }}</span>
+            <span class="badge badge-{{ f.source|replace('claude-ai','ai') }}">{{ f.source }}</span>
+          </div>
+          <div class="finding-meta">
+            <span><code>{{ f.check_id }}</code></span>
+            <span>{{ f.context }}</span>
+            {% if f.resource_path %}<span class="font-mono">{{ f.resource_path }}</span>{% endif %}
+          </div>
+          <div class="finding-detail">{{ f.detail }}</div>
+          <div class="finding-fix">🔧 {{ f.remediation }}</div>
+          {% if f.attack_scenario %}
+          <div class="finding-scenario">⚡ {{ f.attack_scenario }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% elif latest_scan and latest_scan.status == 'done' %}
+    <div class="card">
+      <div class="empty">
+        <div class="empty-icon">✅</div>
+        <h3>No findings</h3>
+        <p>No security misconfigurations detected.</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Right panel: re-scan + history -->
+  <div style="width:240px;flex-shrink:0">
+    <div class="card">
+      <div class="card-title">Run New Scan</div>
+      <form method="post" action="/manifests/{{ manifest.id }}/scan">
+        <div class="form-group">
+          <label class="form-label">Scan Mode</label>
+          <select name="scan_mode" class="form-control">
+            <option value="ai">🤖 AI Agent</option>
+            <option value="static">⚡ Static only</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Start Scan</button>
+      </form>
+    </div>
+
+    {% if scans %}
+    <div class="card">
+      <div class="card-title">Scan History</div>
+      {% for s in scans %}
+      <div class="flex items-center justify-between mb-2">
+        <a href="/scans/{{ s.id }}" class="td-link">#{{ s.id }}</a>
+        <span class="badge badge-{{ s.scan_mode }}">{{ s.scan_mode }}</span>
+        <span class="badge badge-{{ s.status }}">{{ s.status }}</span>
+        {% if s.critical_count %}<span class="badge badge-critical">{{ s.critical_count }}C</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

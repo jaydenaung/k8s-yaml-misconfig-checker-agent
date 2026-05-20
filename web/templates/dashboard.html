@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Dashboard</div>
+    <div class="page-subtitle">Security posture overview</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat critical">
+    <div class="stat-value">{{ critical_open }}</div>
+    <div class="stat-label">🔴 Critical Findings</div>
+  </div>
+  <div class="stat high">
+    <div class="stat-value">{{ high_open }}</div>
+    <div class="stat-label">🟠 High Findings</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ total_scans }}</div>
+    <div class="stat-label">Total Scans</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ total_manifests }}</div>
+    <div class="stat-label">Manifests</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">{{ total_clusters }}</div>
+    <div class="stat-label">Clusters</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Recent Scans</div>
+  {% if recent_scans %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Target</th>
+          <th>Type</th>
+          <th>Mode</th>
+          <th>Status</th>
+          <th>Critical</th>
+          <th>High</th>
+          <th>Triggered by</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for scan in recent_scans %}
+        <tr>
+          <td><a href="/scans/{{ scan.id }}" class="td-link">#{{ scan.id }}</a></td>
+          <td>
+            {% if scan.scan_type == 'manifest' %}
+              <a href="/manifests/{{ scan.target_id }}" class="td-link">{{ scan.target_name }}</a>
+            {% else %}
+              <a href="/clusters/{{ scan.target_id }}" class="td-link">{{ scan.target_name }}</a>
+            {% endif %}
+          </td>
+          <td>{{ scan.scan_type }}</td>
+          <td><span class="badge badge-{{ scan.scan_mode }}">{{ scan.scan_mode }}</span></td>
+          <td>
+            <span class="badge badge-{{ scan.status }}">
+              {% if scan.status == 'running' %}<span class="spinner"></span> {% endif %}
+              {{ scan.status }}
+            </span>
+          </td>
+          <td>{% if scan.critical_count > 0 %}<span class="badge badge-critical">{{ scan.critical_count }}</span>{% else %}—{% endif %}</td>
+          <td>{% if scan.high_count > 0 %}<span class="badge badge-high">{{ scan.high_count }}</span>{% else %}—{% endif %}</td>
+          <td class="text-muted">{{ scan.triggered_by or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">📭</div>
+    <h3>No scans yet</h3>
+    <p><a href="/manifests" style="color:#3b82f6">Upload a manifest</a> or <a href="/clusters" style="color:#3b82f6">onboard a cluster</a> to get started.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

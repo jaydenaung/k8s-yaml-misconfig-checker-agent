@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Manifests — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Manifests</div>
+    <div class="page-subtitle">Upload and scan Kubernetes YAML files</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Upload Manifest</div>
+  <form method="post" action="/manifests/upload" enctype="multipart/form-data">
+    <div class="flex gap-3" style="flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="flex:1;min-width:200px;margin-bottom:0">
+        <label class="form-label">YAML File</label>
+        <input type="file" name="file" accept=".yaml,.yml" required class="form-control">
+      </div>
+      <div class="form-group" style="width:180px;margin-bottom:0">
+        <label class="form-label">Scan Mode</label>
+        <select name="scan_mode" class="form-control">
+          <option value="ai">🤖 AI Agent</option>
+          <option value="static">⚡ Static only</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Upload &amp; Scan</button>
+    </div>
+    <p class="form-hint" style="margin-top:8px">AI mode uses Claude for deep analysis (requires ANTHROPIC_API_KEY). Static mode is instant and free.</p>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">All Manifests</div>
+  {% if manifest_data %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Uploaded by</th>
+          <th>Latest scan</th>
+          <th>Mode</th>
+          <th>Status</th>
+          <th>C</th><th>H</th><th>M</th><th>L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in manifest_data %}
+        {% set m = item.manifest %}
+        {% set s = item.latest_scan %}
+        <tr>
+          <td><a href="/manifests/{{ m.id }}" class="td-link">{{ m.filename }}</a></td>
+          <td class="text-muted">{{ m.uploaded_by_name or '—' }}</td>
+          <td class="text-muted">{% if s %}#{{ s.id }}{% else %}—{% endif %}</td>
+          <td>{% if s %}<span class="badge badge-{{ s.scan_mode }}">{{ s.scan_mode }}</span>{% else %}—{% endif %}</td>
+          <td>
+            {% if s %}
+            <span class="badge badge-{{ s.status }}">
+              {% if s.status == 'running' %}<span class="spinner"></span> {% endif %}
+              {{ s.status }}
+            </span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{% if s and s.critical_count %}<span class="badge badge-critical">{{ s.critical_count }}</span>{% else %}—{% endif %}</td>
+          <td>{% if s and s.high_count %}<span class="badge badge-high">{{ s.high_count }}</span>{% else %}—{% endif %}</td>
+          <td>{% if s and s.medium_count %}<span class="badge badge-medium">{{ s.medium_count }}</span>{% else %}—{% endif %}</td>
+          <td>{% if s and s.low_count %}<span class="badge badge-low">{{ s.low_count }}</span>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">📄</div>
+    <h3>No manifests uploaded yet</h3>
+    <p>Upload your first Kubernetes YAML file above.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

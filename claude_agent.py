@@ -67,6 +67,77 @@ Be thorough but avoid re-running checks you have already completed."""
 MAX_ITERATIONS = 25
 
 
+def analyze_cluster_with_agent(
+    cluster_name: str,
+    kubeconfig_path: Path,
+    api_key: str,
+    verbose: bool = False,
+    model: str = None,
+) -> Tuple[List[Dict], List[Dict]]:
+    """Agentic analysis of a live cluster via kubectl using an uploaded kubeconfig."""
+    client = anthropic.Anthropic(api_key=api_key)
+    model = model or DEFAULT_MODEL
+
+    state: Dict = {
+        "resources":       [],
+        "findings":        [],
+        "done":            False,
+        "summary":         "",
+        "kubeconfig_path": str(kubeconfig_path),
+    }
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"Analyze cluster '{cluster_name}' for Kubernetes security misconfigurations. "
+                "Use query_cluster with namespace='all' where applicable to inspect: "
+                "pods, deployments, clusterroles, clusterrolebindings, rolebindings, "
+                "networkpolicies, secrets, serviceaccounts. "
+                "Report every finding with report_finding. Pay special attention to: "
+                "privileged containers, wildcard RBAC, missing NetworkPolicies, "
+                "service accounts with excessive permissions, containers running as root, "
+                "and hostPath volume mounts. Call finish() when complete."
+            ),
+        }
+    ]
+
+    for _ in range(MAX_ITERATIONS):
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            tools=TOOLS,
+            messages=messages,
+        )
+
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn":
+            break
+        if response.stop_reason != "tool_use":
+            break
+
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                if verbose:
+                    _log_tool_call(block.name, block.input)
+                result = execute_tool(block.name, block.input, state)
+                tool_results.append({
+                    "type":        "tool_result",
+                    "tool_use_id": block.id,
+                    "content":     json.dumps(result),
+                })
+
+        messages.append({"role": "user", "content": tool_results})
+
+        if state.get("done"):
+            break
+
+    return state["resources"], state["findings"]
+
+
 def analyze_with_agent(
     manifest_path: Path,
     api_key: str,

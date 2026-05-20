@@ -8,6 +8,7 @@ tools.py — Tool schemas and execution functions for the K8s security agent
 """
 
 import json
+import os
 import subprocess
 import yaml
 from pathlib import Path
@@ -292,8 +293,12 @@ def _query_cluster(input_data: Dict, state: Dict) -> Dict:
         cmd.extend(["-n", namespace])
     cmd.extend(["-o", "json"])
 
+    env = dict(os.environ)
+    if state.get("kubeconfig_path"):
+        env["KUBECONFIG"] = state["kubeconfig_path"]
+
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
         if result.returncode != 0:
             return {"error": result.stderr[:500] or "kubectl returned non-zero exit code"}
 
