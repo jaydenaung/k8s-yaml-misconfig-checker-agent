@@ -1,6 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Images — KubeSentinel{% endblock %}
 {% block content %}
+<style>
+  .cve-list { margin-top:8px; }
+  .cve-list summary { cursor:pointer; color:#3b82f6; font-size:0.82rem; user-select:none; }
+  .cve-list summary:hover { text-decoration:underline; }
+  .cve-table { width:100%; border-collapse:collapse; margin-top:8px; font-size:0.8rem; }
+  .cve-table th { text-align:left; color:#94a3b8; font-weight:500; padding:4px 8px; border-bottom:1px solid #1e293b; }
+  .cve-table td { padding:4px 8px; border-bottom:1px solid #1e293b; color:#cbd5e1; }
+  .cve-table tr:last-child td { border-bottom:none; }
+  .cve-id { font-family:monospace; color:#f59e0b; }
+  .cve-fixed { color:#4ade80; }
+  .cve-unfixed { color:#94a3b8; }
+</style>
+
 <div class="page-header">
   <div>
     <div class="page-title">Container Images</div>
@@ -16,17 +29,43 @@
         <tr>
           <th>Image</th>
           <th>Detected in</th>
-          <th>Critical CVEs</th>
-          <th>High CVEs</th>
-          <th>Medium CVEs</th>
-          <th>Low CVEs</th>
+          <th>Critical</th>
+          <th>High</th>
+          <th>Medium</th>
+          <th>Low</th>
           <th>Total</th>
         </tr>
       </thead>
       <tbody>
         {% for img in images %}
+        {% set cves = details_map.get(img.image_ref, []) %}
         <tr>
-          <td class="font-mono">{{ img.image_ref }}</td>
+          <td>
+            <span class="font-mono">{{ img.image_ref }}</span>
+            {% if cves %}
+            <details class="cve-list">
+              <summary>Top {{ cves|length }} critical CVE{{ 's' if cves|length != 1 else '' }} ▾</summary>
+              <table class="cve-table">
+                <thead>
+                  <tr>
+                    <th>CVE ID</th>
+                    <th>Package</th>
+                    <th>Fix available</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for cve in cves %}
+                  <tr>
+                    <td class="cve-id">{{ cve.id or '—' }}</td>
+                    <td>{{ cve.package or '—' }}</td>
+                    <td>{% if cve.fixed %}<span class="cve-fixed">{{ cve.fixed }}</span>{% else %}<span class="cve-unfixed">No fix yet</span>{% endif %}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+            {% endif %}
+          </td>
           <td class="text-muted">{{ scan_map.get(img.scan_id, '—') }}</td>
           <td>{% if img.critical_cves %}<span class="badge badge-critical">{{ img.critical_cves }}</span>{% else %}—{% endif %}</td>
           <td>{% if img.high_cves %}<span class="badge badge-high">{{ img.high_cves }}</span>{% else %}—{% endif %}</td>
@@ -38,7 +77,7 @@
       </tbody>
     </table>
   </div>
-  <p class="form-hint" style="margin-top:12px">CVE counts are populated when Trivy is installed. Install with <code>brew install trivy</code> (macOS) or see <a href="https://aquasecurity.github.io/trivy/" style="color:#3b82f6">trivy docs</a>.</p>
+  <p class="form-hint" style="margin-top:12px">CVE counts are populated when Trivy is installed. Install with <code>brew install trivy</code> (macOS) or see <a href="https://aquasecurity.github.io/trivy/" style="color:#3b82f6">trivy docs</a>. Only the top 5 critical CVEs are listed per image.</p>
   {% else %}
   <div class="empty">
     <div class="empty-icon">📦</div>

@@ -2,8 +2,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from web.auth import check_login
-from web.database import Cluster, Finding, Manifest, Scan, get_db
+from web.auth import check_admin, check_login
+from web.database import Cluster, Finding, Image, Manifest, Scan, get_db
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -40,3 +40,18 @@ async def dashboard(request: Request):
         "high_open":      high_open,
         "recent_scans":   recent_scans,
     })
+
+
+@router.post("/scans/clear")
+async def clear_history(request: Request):
+    result = check_admin(request)
+    if isinstance(result, RedirectResponse):
+        return result
+
+    with get_db() as db:
+        db.query(Finding).delete()
+        db.query(Image).delete()
+        db.query(Scan).delete()
+        db.commit()
+
+    return RedirectResponse("/", status_code=302)

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -38,8 +40,17 @@ async def images_list(request: Request):
                 scan_map[sid] = s.target_name
         db.expunge_all()
 
+    details_map: dict = {}
+    for img in images:
+        if img.cve_details:
+            try:
+                details_map[img.image_ref] = json.loads(img.cve_details)
+            except Exception:
+                details_map[img.image_ref] = []
+
     return templates.TemplateResponse(request, "images.html", context={
-        "user":     user,
-        "images":   images,
-        "scan_map": scan_map,
+        "user":        user,
+        "images":      images,
+        "scan_map":    scan_map,
+        "details_map": details_map,
     })
