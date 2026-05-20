@@ -4,6 +4,12 @@ A true AI security agent for Kubernetes manifests. Claude drives the analysis us
 Anthropic tool_use API — deciding which checks to run, scanning images for CVEs, querying
 live clusters, and identifying compound risk scenarios that static rules alone cannot catch.
 
+## Web Dashboard
+
+![KubeSentinel Dashboard](img/kubesentinel1.png)
+
+The on-prem web dashboard gives your team a shared view of security posture across manifests and clusters — with multi-user login, scan history, and scheduled cluster scanning. See [Web Dashboard (on-prem)](#web-dashboard-on-prem) for setup.
+
 ## How it works
 
 Instead of a fixed pipeline, Claude acts as an autonomous agent with tools:
@@ -190,6 +196,45 @@ kubesentinel/
 │   └── .k8s-checker-ignore.yaml    # Example suppression config
 └── reports/                         # Output directory (gitignored)
 ```
+
+## Web Dashboard (on-prem)
+
+![KubeSentinel Dashboard](img/kubesentinel1.png)
+
+A full security dashboard for teams — runs on your internal network, accessible by IP. No SaaS, no cloud dependency.
+
+**Start the server:**
+
+```bash
+source venv/bin/activate
+python server.py                    # http://0.0.0.0:8000 (accessible on local network)
+python server.py --port 8080        # custom port
+python server.py --host 127.0.0.1  # local only
+```
+
+On first visit, a setup wizard guides you through creating the admin account.
+
+**What the dashboard provides:**
+
+| Page | What it does |
+|------|-------------|
+| Dashboard | Security posture overview — critical/high counts, recent scans |
+| Manifests | Upload YAML → choose AI Agent or Static → scan runs immediately → findings displayed |
+| Clusters | Onboard via kubeconfig upload → scan on demand or on schedule |
+| Images | Container images detected across all scans, CVE counts per image |
+| Users | Admin-only: create accounts, activate/deactivate users |
+
+**Scan scheduling for clusters:**
+
+Set a recurring schedule per cluster (every 6h / 12h / 24h / 48h / weekly). Scheduled scans run automatically in the background via APScheduler — no cron jobs or external infrastructure needed.
+
+**Multi-user:**
+
+Each team member gets their own login. Admins can create users and delete clusters. All scan results are shared across users.
+
+**Data storage:**
+
+Everything is stored in `data/` (SQLite database + uploaded files). This directory is gitignored. Kubeconfig files are stored with `chmod 600`.
 
 ## PR-level manifest scanning (GitHub Actions)
 
