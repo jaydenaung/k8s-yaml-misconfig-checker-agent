@@ -40,13 +40,22 @@ async def images_list(request: Request):
                 scan_map[sid] = s.target_name
         db.expunge_all()
 
+    SEVERITIES = ["critical", "high", "medium", "low"]
     details_map: dict = {}
     for img in images:
         if img.cve_details:
             try:
-                details_map[img.image_ref] = json.loads(img.cve_details)
+                raw = json.loads(img.cve_details)
+                if isinstance(raw, dict):
+                    # New format: {critical: [...], high: [...], ...}
+                    details_map[img.image_ref] = {
+                        sev: raw.get(sev, []) for sev in SEVERITIES if raw.get(sev)
+                    }
+                elif isinstance(raw, list) and raw:
+                    # Legacy format: flat list of critical CVEs
+                    details_map[img.image_ref] = {"critical": raw}
             except Exception:
-                details_map[img.image_ref] = []
+                pass
 
     return templates.TemplateResponse(request, "images.html", context={
         "user":        user,

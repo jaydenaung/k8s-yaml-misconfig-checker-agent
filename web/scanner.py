@@ -225,24 +225,25 @@ def _trivy_scan(image_ref: str) -> Dict:
             return {}
         data = json.loads(result.stdout)
         counts: Dict[str, int] = {}
-        top_critical = []
+        top: Dict[str, List] = {"CRITICAL": [], "HIGH": [], "MEDIUM": [], "LOW": []}
         for res in data.get("Results", []):
             for v in res.get("Vulnerabilities") or []:
                 sev = v.get("Severity", "UNKNOWN")
                 counts[sev] = counts.get(sev, 0) + 1
-                if sev == "CRITICAL" and len(top_critical) < 5:
-                    top_critical.append({
+                if sev in top and len(top[sev]) < 5:
+                    top[sev].append({
                         "id":      v.get("VulnerabilityID"),
                         "package": v.get("PkgName"),
                         "fixed":   v.get("FixedVersion"),
                     })
+        details = {k.lower(): v for k, v in top.items() if v}
         return {
             "critical": counts.get("CRITICAL", 0),
             "high":     counts.get("HIGH", 0),
             "medium":   counts.get("MEDIUM", 0),
             "low":      counts.get("LOW", 0),
             "total":    sum(counts.values()),
-            "details":  json.dumps(top_critical),
+            "details":  json.dumps(details),
         }
     except FileNotFoundError:
         return {}  # Trivy not installed — skip silently

@@ -2,15 +2,20 @@
 {% block title %}Images — KubeSentinel{% endblock %}
 {% block content %}
 <style>
-  .cve-toggle { cursor:pointer; color:#3b82f6; font-size:0.78rem; background:none; border:none; padding:0; margin-top:4px; display:block; }
+  .cve-toggle { cursor:pointer; color:#3b82f6; font-size:0.78rem; background:none; border:none; padding:2px 0 0; margin-top:3px; display:block; text-align:left; }
   .cve-toggle:hover { text-decoration:underline; }
-  .cve-rows { margin-top:6px; font-size:0.78rem; }
-  .cve-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; padding:3px 0; border-bottom:1px solid #f1f5f9; }
+  .cve-section { margin-top:8px; }
+  .cve-section-title { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+  .cve-section-title.critical { color:#dc2626; }
+  .cve-section-title.high     { color:#ea580c; }
+  .cve-section-title.medium   { color:#a16207; }
+  .cve-section-title.low      { color:#1d4ed8; }
+  .cve-row { display:grid; grid-template-columns:160px 1fr 1fr; gap:6px; font-size:0.78rem; padding:3px 0; border-bottom:1px solid #f1f5f9; }
   .cve-row:last-child { border-bottom:none; }
-  .cve-row-header { color:#94a3b8; font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:.04em; }
+  .cve-row-header { color:#94a3b8; font-weight:600; font-size:0.70rem; text-transform:uppercase; letter-spacing:.04em; }
   .cve-id { font-family:ui-monospace,monospace; color:#f59e0b; }
   .cve-fixed { color:#16a34a; }
-  .cve-unfixed { color:#94a3b8; }
+  .cve-unfixed { color:#94a3b8; font-style:italic; }
 </style>
 
 <div class="page-header">
@@ -37,16 +42,24 @@
       </thead>
       <tbody>
         {% for img in images %}
-        {% set cves = details_map.get(img.image_ref, []) %}
+        {% set by_sev = details_map.get(img.image_ref, {}) %}
         <tr>
           <td>
             <span class="font-mono">{{ img.image_ref }}</span>
-            {% if cves %}
-            <button class="cve-toggle" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden;this.textContent=this.nextElementSibling.hidden?'▸ Show top {{ cves|length }} critical CVE':'▾ Hide CVEs'">▸ Show top {{ cves|length }} critical CVE{{ 's' if cves|length != 1 else '' }}</button>
-            <div hidden>
-              <div class="cve-rows">
+            {% if by_sev %}
+            <button class="cve-toggle" onclick="
+              var d=this.nextElementSibling;
+              var open=!d.hidden;
+              d.hidden=open;
+              this.textContent=open?'▸ Show CVE details':'▾ Hide CVE details';
+            ">▸ Show CVE details</button>
+            <div hidden style="margin-top:6px">
+              {% for sev in ['critical','high','medium','low'] %}
+              {% if by_sev.get(sev) %}
+              <div class="cve-section">
+                <div class="cve-section-title {{ sev }}">{{ sev }} — top {{ by_sev[sev]|length }}</div>
                 <div class="cve-row cve-row-header"><span>CVE ID</span><span>Package</span><span>Fix available</span></div>
-                {% for cve in cves %}
+                {% for cve in by_sev[sev] %}
                 <div class="cve-row">
                   <span class="cve-id">{{ cve.id or '—' }}</span>
                   <span>{{ cve.package or '—' }}</span>
@@ -54,6 +67,8 @@
                 </div>
                 {% endfor %}
               </div>
+              {% endif %}
+              {% endfor %}
             </div>
             {% endif %}
           </td>
@@ -68,7 +83,7 @@
       </tbody>
     </table>
   </div>
-  <p class="form-hint" style="margin-top:12px">CVE counts are populated when Trivy is installed. Install with <code>brew install trivy</code> (macOS) or see <a href="https://aquasecurity.github.io/trivy/" style="color:#3b82f6">trivy docs</a>. Only the top 5 critical CVEs are listed per image.</p>
+  <p class="form-hint" style="margin-top:12px">CVE counts reflect all vulnerabilities found. The expandable details show up to 5 CVEs per severity. CVE data is populated when <a href="https://aquasecurity.github.io/trivy/" style="color:#3b82f6">Trivy</a> is installed — rescan after installing to populate existing images.</p>
   {% else %}
   <div class="empty">
     <div class="empty-icon">📦</div>
