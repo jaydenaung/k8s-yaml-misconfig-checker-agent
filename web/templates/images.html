@@ -2,15 +2,14 @@
 {% block title %}Images — KubeSentinel{% endblock %}
 {% block content %}
 <style>
-  .cve-list { margin-top:8px; }
-  .cve-list summary { cursor:pointer; color:#3b82f6; font-size:0.82rem; user-select:none; }
-  .cve-list summary:hover { text-decoration:underline; }
-  .cve-table { width:100%; border-collapse:collapse; margin-top:8px; font-size:0.8rem; }
-  .cve-table th { text-align:left; color:#94a3b8; font-weight:500; padding:4px 8px; border-bottom:1px solid #1e293b; }
-  .cve-table td { padding:4px 8px; border-bottom:1px solid #1e293b; color:#cbd5e1; }
-  .cve-table tr:last-child td { border-bottom:none; }
-  .cve-id { font-family:monospace; color:#f59e0b; }
-  .cve-fixed { color:#4ade80; }
+  .cve-toggle { cursor:pointer; color:#3b82f6; font-size:0.78rem; background:none; border:none; padding:0; margin-top:4px; display:block; }
+  .cve-toggle:hover { text-decoration:underline; }
+  .cve-rows { margin-top:6px; font-size:0.78rem; }
+  .cve-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; padding:3px 0; border-bottom:1px solid #f1f5f9; }
+  .cve-row:last-child { border-bottom:none; }
+  .cve-row-header { color:#94a3b8; font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:.04em; }
+  .cve-id { font-family:ui-monospace,monospace; color:#f59e0b; }
+  .cve-fixed { color:#16a34a; }
   .cve-unfixed { color:#94a3b8; }
 </style>
 
@@ -43,27 +42,19 @@
           <td>
             <span class="font-mono">{{ img.image_ref }}</span>
             {% if cves %}
-            <details class="cve-list">
-              <summary>Top {{ cves|length }} critical CVE{{ 's' if cves|length != 1 else '' }} ▾</summary>
-              <table class="cve-table">
-                <thead>
-                  <tr>
-                    <th>CVE ID</th>
-                    <th>Package</th>
-                    <th>Fix available</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for cve in cves %}
-                  <tr>
-                    <td class="cve-id">{{ cve.id or '—' }}</td>
-                    <td>{{ cve.package or '—' }}</td>
-                    <td>{% if cve.fixed %}<span class="cve-fixed">{{ cve.fixed }}</span>{% else %}<span class="cve-unfixed">No fix yet</span>{% endif %}</td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </details>
+            <button class="cve-toggle" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden;this.textContent=this.nextElementSibling.hidden?'▸ Show top {{ cves|length }} critical CVE':'▾ Hide CVEs'">▸ Show top {{ cves|length }} critical CVE{{ 's' if cves|length != 1 else '' }}</button>
+            <div hidden>
+              <div class="cve-rows">
+                <div class="cve-row cve-row-header"><span>CVE ID</span><span>Package</span><span>Fix available</span></div>
+                {% for cve in cves %}
+                <div class="cve-row">
+                  <span class="cve-id">{{ cve.id or '—' }}</span>
+                  <span>{{ cve.package or '—' }}</span>
+                  <span>{% if cve.fixed %}<span class="cve-fixed">{{ cve.fixed }}</span>{% else %}<span class="cve-unfixed">No fix yet</span>{% endif %}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
             {% endif %}
           </td>
           <td class="text-muted">{{ scan_map.get(img.scan_id, '—') }}</td>
