@@ -166,10 +166,13 @@ def analyze_cluster_with_agent(
                 if verbose:
                     _log_tool_call(block.name, block.input)
                 result = execute_tool(block.name, block.input, state)
+                result_json = json.dumps(result)
+                if len(result_json) > 8000:
+                    result_json = result_json[:8000] + "\n...[truncated — response too large]"
                 tool_results.append({
                     "type":        "tool_result",
                     "tool_use_id": block.id,
-                    "content":     json.dumps(result),
+                    "content":     result_json,
                 })
 
         messages.append({"role": "user", "content": tool_results})

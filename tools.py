@@ -410,6 +410,21 @@ def _query_cluster(input_data: Dict, state: Dict) -> Dict:
 def _summarize_cluster_resource(data: Dict) -> Dict:
     """Extract security-relevant fields only to avoid flooding Claude's context window."""
     kind = data.get("kind", "")
+    items = data.get("items", [])
+
+    # kubectl returns kind="List" when querying with -A (all namespaces).
+    # Detect the real resource type from the first item so our handlers match.
+    if kind == "List" and items:
+        item_kind = items[0].get("kind", "")
+        kind = {
+            "Secret":             "SecretList",
+            "ClusterRole":        "ClusterRoleList",
+            "Role":               "RoleList",
+            "ClusterRoleBinding": "ClusterRoleBindingList",
+            "RoleBinding":        "RoleBindingList",
+            "NetworkPolicy":      "NetworkPolicyList",
+            "Pod":                "PodList",
+        }.get(item_kind, kind)
 
     if kind == "PodList":
         items = []
