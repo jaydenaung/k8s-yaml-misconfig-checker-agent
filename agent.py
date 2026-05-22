@@ -27,7 +27,7 @@ except ImportError:
     pass
 
 from analyzer import load_manifests, load_manifests_from_files, run_static_checks
-from claude_agent import analyze_with_agent, DEFAULT_MODEL
+from claude_agent import analyze_with_agent, generate_patches_for_findings, DEFAULT_MODEL
 from reporter import render_report, render_pr_comment, save_report
 from suppressor import load_suppressions, apply_suppressions
 
@@ -72,6 +72,11 @@ def main():
     parser.add_argument(
         "--pr-comment",
         help="Format output as a compact GitHub PR comment (use with --output)",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--patch",
+        help="Generate AI-corrected YAML patches for every finding (premium feature, requires ANTHROPIC_API_KEY)",
         action="store_true",
     )
     args = parser.parse_args()
@@ -132,6 +137,15 @@ def main():
                 findings = unique
 
         findings, suppressed = apply_suppressions(findings, suppressions)
+
+        if args.patch and not args.no_ai:
+            api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+            if api_key:
+                print("[patch] Generating AI patches for findings...")
+                model = args.model or os.environ.get("K8S_CHECKER_MODEL")
+                findings = generate_patches_for_findings(findings, api_key, verbose=True, model=model)
+                patched = sum(1 for f in findings if f.get("suggested_patch"))
+                print(f"        {patched} patch(es) generated")
 
         if args.json:
             print(json.dumps(findings, indent=2))
@@ -218,6 +232,17 @@ def main():
     findings, suppressed = apply_suppressions(findings, suppressions)
     if suppressed:
         print(f"      {len(suppressed)} finding(s) suppressed by .k8s-checker-ignore.yaml")
+
+    if args.patch:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            print("[WARN] --patch requires ANTHROPIC_API_KEY — skipping patch generation")
+        else:
+            print("\n[patch] Generating AI patches for findings...")
+            model = args.model or os.environ.get("K8S_CHECKER_MODEL")
+            findings = generate_patches_for_findings(findings, api_key, verbose=True, model=model)
+            patched = sum(1 for f in findings if f.get("suggested_patch"))
+            print(f"        {patched} patch(es) generated")
 
     if args.json:
         print(json.dumps(findings, indent=2))

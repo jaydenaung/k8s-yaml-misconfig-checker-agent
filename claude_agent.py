@@ -17,14 +17,14 @@ import anthropic
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from tools import TOOLS, execute_tool
+from tools import build_tools, execute_tool
 
 DEFAULT_MODEL = os.environ.get("K8S_CHECKER_MODEL", "claude-sonnet-4-6")
 
 # NOTE: Prompt injection risk — malicious YAML files could embed text attempting to
 # override these instructions. The tool_use API reduces (but does not eliminate) this
 # risk. Never load YAML from untrusted sources without reviewing it first.
-SYSTEM_PROMPT = """You are a senior Kubernetes security architect with deep expertise in:
+_SYSTEM_PROMPT_BASE = """You are a senior Kubernetes security architect with deep expertise in:
 - NSA/CISA Kubernetes Hardening Guide
 - CIS Kubernetes Benchmark
 - MITRE ATT&CK for Containers
@@ -57,8 +57,6 @@ You have access to the following tools. Use them methodically:
   - Call report_finding with check_id="SAP-001", source reflected in detail, and the
     confirmed_access list in the detail field. Set severity to CRITICAL if secrets are
     accessible, HIGH otherwise.
-  - Immediately call suggest_patch with the fix (automountServiceAccountToken: false +
-    least-privilege RBAC).
 - This turns a theoretical static finding into a runtime-proven exploit path.
 
 **AI findings:**
@@ -81,32 +79,29 @@ You have access to the following tools. Use them methodically:
   for 3 signals, CMP-003 for 4), severity=CRITICAL if CVE+RBAC or CVE+misconfig+network,
   else HIGH. In the detail field, list every signal with specifics. In attack_scenario,
   write the full exploit chain: "attacker exploits CVE → escapes container → uses SA token
-  to exfiltrate secrets". Then call suggest_patch with a prioritised fix for all signals.
-
-**Patch generation (REQUIRED for every finding):**
-- After EVERY finding — whether from run_check or report_finding — immediately call suggest_patch.
-- Use the SAME check_id and context as the finding.
-- patch_yaml must be a minimal corrected YAML snippet showing only the changed field(s)
-  with enough parent-key indentation to be unambiguous. Do NOT reproduce the entire manifest.
-- Example for a privileged container finding on Deployment/api:
-    spec:
-      template:
-        spec:
-          containers:
-          - name: api
-            securityContext:
-              privileged: false
-              runAsNonRoot: true
-              runAsUser: 1000
-- explanation: one sentence on what changed and why it fixes the issue.
+  to exfiltrate secrets".
 
 **Finishing:**
 - Call finish() when analysis is complete
 
 Be thorough but avoid re-running checks you have already completed."""
 
+SYSTEM_PROMPT = _SYSTEM_PROMPT_BASE
+
+_PATCH_GEN_SYSTEM = (
+    "You are a Kubernetes security engineer. "
+    "For each finding provided, call suggest_patch with a minimal YAML snippet that corrects the issue. "
+    "patch_yaml must include just the changed field(s) with enough parent-key context to be unambiguous. "
+    "explanation must be one sentence on what changed and why. "
+    "Call finish() when all patches have been generated."
+)
+
 
 MAX_ITERATIONS = 25
+
+
+_SCAN_TOOLS = build_tools(patch_enabled=False)   # patches are always post-scan
+_PATCH_TOOLS = build_tools(patch_enabled=True)    # only used by generate_patches_for_findings
 
 
 def analyze_cluster_with_agent(
@@ -149,7 +144,7 @@ def analyze_cluster_with_agent(
             model=model,
             max_tokens=4096,
             system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            tools=_SCAN_TOOLS,
             messages=messages,
         )
 
@@ -232,7 +227,7 @@ def analyze_with_agent(
             model=model,
             max_tokens=4096,
             system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            tools=_SCAN_TOOLS,
             messages=messages,
         )
 
@@ -252,6 +247,84 @@ def analyze_with_agent(
 
                 result = execute_tool(block.name, block.input, state)
 
+                result_json = json.dumps(result)
+                if len(result_json) > 8000:
+                    result_json = result_json[:8000] + "\n...[truncated — response too large]"
+
+                tool_results.append({
+                    "type":        "tool_result",
+                    "tool_use_id": block.id,
+                    "content":     result_json,
+                })
+
+        messages.append({"role": "user", "content": tool_results})
+
+        if state.get("done"):
+            break
+
+    return state["resources"], state["findings"]
+
+
+def generate_patches_for_findings(
+    findings: List[Dict],
+    api_key: str,
+    verbose: bool = False,
+    model: str = None,
+) -> List[Dict]:
+    """
+    Post-scan patch generation — works on any findings list (static or AI scan).
+    Runs a minimal agentic loop with only suggest_patch + finish tools.
+    Returns the findings list with suggested_patch / patch_explanation fields populated.
+    """
+    unpached = [f for f in findings if not f.get("suggested_patch")]
+    if not unpached:
+        return findings
+
+    client = anthropic.Anthropic(api_key=api_key, max_retries=3)
+    model = model or DEFAULT_MODEL
+
+    state: Dict = {"resources": [], "findings": list(findings), "done": False, "summary": ""}
+
+    patch_only_tools = [t for t in _PATCH_TOOLS if t["name"] in ("suggest_patch", "finish")]
+
+    findings_summary = "\n".join(
+        f"- [{f.get('check_id','?')}] {f.get('context','?')}: {f.get('title','?')} ({f.get('severity','?')})"
+        for f in unpached
+    )
+
+    messages = [{
+        "role": "user",
+        "content": (
+            f"Generate corrected YAML patches for each of the {len(unpached)} findings below. "
+            "For each, call suggest_patch with the same check_id and context as the finding, "
+            "a minimal patch_yaml snippet (just the changed field(s) with parent-key context), "
+            "and a one-sentence explanation. Call finish() when all patches are generated.\n\n"
+            f"FINDINGS:\n{findings_summary}"
+        ),
+    }]
+
+    for _ in range(MAX_ITERATIONS):
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=_PATCH_GEN_SYSTEM,
+            tools=patch_only_tools,
+            messages=messages,
+        )
+
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason in ("end_turn",):
+            break
+        if response.stop_reason != "tool_use":
+            break
+
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                if verbose:
+                    _log_tool_call(block.name, block.input)
+                result = execute_tool(block.name, block.input, state)
                 tool_results.append({
                     "type":        "tool_result",
                     "tool_use_id": block.id,
@@ -263,7 +336,7 @@ def analyze_with_agent(
         if state.get("done"):
             break
 
-    return state["resources"], state["findings"]
+    return state["findings"]
 
 
 _TOOL_ICONS = {

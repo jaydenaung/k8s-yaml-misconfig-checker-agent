@@ -16,6 +16,56 @@ from web.database import Cluster, Finding, Image, Manifest, Scan, get_db
 SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 
 
+def run_patch_generation(scan_id: int) -> None:
+    """Post-scan patch generation — reads existing findings, calls Claude, saves patches."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return
+
+    with get_db() as db:
+        scan = db.query(Scan).filter(Scan.id == scan_id).first()
+        if not scan:
+            return
+        scan.patches_status = "generating"
+        db.commit()
+
+        db_findings = db.query(Finding).filter(Finding.scan_id == scan_id).all()
+        findings_data = [
+            {
+                "check_id":    f.check_id,
+                "context":     f.context,
+                "title":       f.title,
+                "severity":    f.severity,
+                "detail":      f.detail,
+                "remediation": f.remediation,
+                "source":      f.source,
+                "suggested_patch":   f.suggested_patch,
+                "patch_explanation": f.patch_explanation,
+            }
+            for f in db_findings
+        ]
+
+        try:
+            from claude_agent import generate_patches_for_findings
+            patched = generate_patches_for_findings(findings_data, api_key)
+
+            for pf in patched:
+                if pf.get("suggested_patch"):
+                    for dbf in db_findings:
+                        if dbf.check_id == pf["check_id"] and dbf.context == pf["context"]:
+                            dbf.suggested_patch   = pf["suggested_patch"]
+                            dbf.patch_explanation = pf.get("patch_explanation")
+                            break
+
+            scan.patches_status = "done"
+            db.commit()
+
+        except Exception as exc:
+            scan.patches_status = "failed"
+            db.commit()
+            raise exc
+
+
 def run_scan(scan_id: int) -> None:
     """Execute a scan and persist all findings. Called as a BackgroundTask."""
     with get_db() as db:

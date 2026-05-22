@@ -22,7 +22,29 @@
       {% if scan.triggered_by %} · by {{ scan.triggered_by }}{% endif %}
     </div>
   </div>
-  <a href="javascript:history.back()" class="btn btn-secondary">← Back</a>
+  <div class="flex gap-2 items-center">
+    {% if scan.status == 'done' %}
+      {% if scan.patches_status == 'none' %}
+      <form method="post" action="/scans/{{ scan.id }}/patches" style="margin:0">
+        <button type="submit" class="btn btn-secondary" style="border-color:#7c3aed;color:#7c3aed">
+          ✨ Generate AI Patches
+        </button>
+      </form>
+      {% elif scan.patches_status == 'generating' %}
+      <span style="font-size:13px;color:#7c3aed"><span class="spinner" style="border-top-color:#7c3aed;border-color:#ede9fe"></span> Generating patches…</span>
+      <script>(function poll(){setTimeout(function(){fetch('/api/scans/{{ scan.id }}/status').then(r=>r.json()).then(d=>{if(d.patches_status==='done'||d.patches_status==='failed'){location.reload();}else{poll();}}).catch(poll);},4000);})();</script>
+      {% elif scan.patches_status == 'done' %}
+      <span style="font-size:12px;color:#16a34a;background:#dcfce7;padding:4px 10px;border-radius:10px">✅ Patches generated</span>
+      {% elif scan.patches_status == 'failed' %}
+      <form method="post" action="/scans/{{ scan.id }}/patches" style="margin:0">
+        <button type="submit" class="btn btn-secondary" style="border-color:#dc2626;color:#dc2626" title="Patch generation failed — retry">
+          ↺ Retry Patches
+        </button>
+      </form>
+      {% endif %}
+    {% endif %}
+    <a href="javascript:history.back()" class="btn btn-secondary">← Back</a>
+  </div>
 </div>
 
 {% if scan.status in ('queued', 'running') %}

@@ -272,6 +272,13 @@ TOOLS = [
 ]
 
 
+def build_tools(patch_enabled: bool = True) -> list:
+    """Return the tool list, excluding suggest_patch when patches are disabled."""
+    if patch_enabled:
+        return TOOLS
+    return [t for t in TOOLS if t["name"] != "suggest_patch"]
+
+
 def execute_tool(name: str, input_data: Dict, state: Dict) -> Any:
     dispatch = {
         "load_manifest":          _load_manifest,

@@ -70,8 +70,9 @@ class Scan(Base):
     medium_count   = Column(Integer, default=0)
     low_count      = Column(Integer, default=0)
     info_count     = Column(Integer, default=0)
-    triggered_by   = Column(String(64), nullable=True)    # username or "scheduler"
-    error_message  = Column(Text, nullable=True)
+    triggered_by    = Column(String(64), nullable=True)    # username or "scheduler"
+    error_message   = Column(Text, nullable=True)
+    patches_status  = Column(String(16), default="none")  # none | generating | done | failed
 
 
 class Finding(Base):
@@ -111,6 +112,7 @@ def _migrate():
     new_columns = [
         ("findings", "suggested_patch",   "TEXT"),
         ("findings", "patch_explanation", "TEXT"),
+        ("scans",    "patches_status",    "TEXT DEFAULT 'none'"),
     ]
     with engine.connect() as conn:
         for table, col, coltype in new_columns:
