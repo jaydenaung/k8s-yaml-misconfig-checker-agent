@@ -687,12 +687,29 @@ def _run_check(input_data: Dict, state: Dict) -> Dict:
     }
 
 
+_UNSCANNABLE_PREFIXES = (
+    "docker/desktop-",          # Docker Desktop internal images — not in public registries
+    "registry.k8s.io/pause",    # pause containers — no CVE surface
+    "k8s.gcr.io/pause",
+)
+
+
+def _is_unscannable(image: str) -> bool:
+    """Return True for images Trivy cannot meaningfully scan."""
+    if "@sha256:" in image:
+        return True   # digest-only refs can't be pulled by name
+    return any(image.startswith(p) for p in _UNSCANNABLE_PREFIXES)
+
+
 def _trivy_image_scan(image: str) -> Dict:
     """Shared Trivy helper — returns CVE counts + top critical CVEs, or {} on any failure."""
+    if _is_unscannable(image):
+        return {}
     try:
         result = subprocess.run(
-            ["trivy", "image", "--format", "json", "--quiet", "--no-progress", image],
-            capture_output=True, text=True, timeout=120,
+            ["trivy", "image", "--format", "json", "--quiet", "--no-progress",
+             "--skip-java-db-update", image],
+            capture_output=True, text=True, timeout=45,
         )
         if result.returncode not in (0, 1):
             return {}
@@ -725,7 +742,12 @@ def _trivy_image_scan(image: str) -> Dict:
 
 def _lookup_image_cves(input_data: Dict, state: Dict) -> Dict:
     image = input_data["image"]
-    cves = _trivy_image_scan(image)
+    cache = state.setdefault("cve_cache", {})
+    if image in cache:
+        cves = cache[image]
+    else:
+        cves = _trivy_image_scan(image)
+        cache[image] = cves
     if not cves:
         return {"available": False, "message": "Trivy not installed or scan failed. Install from https://aquasecurity.github.io/trivy/"}
     return {
@@ -770,10 +792,23 @@ _SA_SENSITIVE_CHECKS = [
 ]
 
 
+_SYSTEM_NAMESPACES = {"kube-system", "kube-public", "kube-node-lease"}
+
+
 def _probe_service_account(input_data: Dict, state: Dict) -> Dict:
     namespace      = input_data.get("namespace", "default")
     sa_name        = input_data.get("service_account", "default")
     target_ns      = input_data.get("target_namespace") or namespace
+
+    # Skip system SAs — they have expected elevated access and probing them
+    # generates noise + burns time (13 kubectl calls per SA).
+    if namespace in _SYSTEM_NAMESPACES:
+        return {
+            "skipped": True,
+            "reason":  f"Namespace '{namespace}' is a system namespace — SA probing skipped.",
+            "service_account": sa_name,
+            "namespace":       namespace,
+        }
 
     env = dict(os.environ)
     if state.get("kubeconfig_path"):
@@ -872,9 +907,18 @@ def _scan_cluster_images(input_data: Dict, state: Dict) -> Dict:
     if not image_pods:
         return {"images_scanned": 0, "message": "No images found"}
 
+    # Filter out images Trivy cannot scan and cap at 8 to avoid runaway scanning
+    scannable = {img: pods for img, pods in image_pods.items() if not _is_unscannable(img)}
+    skipped   = len(image_pods) - len(scannable)
+    capped    = dict(list(scannable.items())[:8])
+
+    cache = state.setdefault("cve_cache", {})
+
     results = []
-    for image, pods in image_pods.items():
-        cves = _trivy_image_scan(image)
+    for image, pods in capped.items():
+        # Reuse cached result from a prior lookup_image_cves call if available
+        cves = cache.get(image) or _trivy_image_scan(image)
+        cache[image] = cves
         results.append({
             "image":         image,
             "pods":          pods,
@@ -892,11 +936,14 @@ def _scan_cluster_images(input_data: Dict, state: Dict) -> Dict:
 
     return {
         "images_scanned":    len(results),
+        "images_skipped":    skipped + (len(scannable) - len(capped)),
         "high_risk_images":  len(high_risk),
         "results":           results,
         "summary": (
-            f"Scanned {len(results)} unique images. "
-            f"{len(high_risk)} have significant CVEs (critical > 0 or high > 5)."
+            f"Scanned {len(results)} images "
+            f"({skipped} skipped — digest refs or internal; "
+            f"{len(scannable) - len(capped)} capped). "
+            f"{len(high_risk)} have significant CVEs."
         ),
     }
 
