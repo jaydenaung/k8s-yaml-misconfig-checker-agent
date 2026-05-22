@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Scan #{{ scan.id }} — KubeSentinel{% endblock %}
 {% block content %}
+<style>
+  .finding-patch { margin-top:8px; background:#0f172a; border-radius:6px; overflow:hidden; }
+  .patch-label { font-size:11px; font-weight:600; color:#60a5fa; padding:6px 10px 0; text-transform:uppercase; letter-spacing:.05em; }
+  .patch-code { font-family:ui-monospace,monospace; font-size:12px; color:#e2e8f0; padding:8px 12px 10px; margin:0; white-space:pre-wrap; word-break:break-all; }
+  .patch-explanation { font-size:12px; color:#94a3b8; padding:0 10px 8px; }
+  .sa-probe-section { border:1px solid #f59e0b22; border-radius:8px; padding:14px 16px; margin-bottom:10px; border-left:4px solid #f59e0b; background:#fffbeb08; }
+  .sa-probe-section .finding-title { color:#92400e; }
+  .confirmed-access { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .access-chip { background:#fee2e2; color:#dc2626; font-size:11px; font-family:ui-monospace,monospace; padding:2px 8px; border-radius:10px; font-weight:500; }
+</style>
+
 <div class="page-header">
   <div>
     <div class="page-title">Scan #{{ scan.id }}</div>
@@ -22,17 +33,55 @@
 <div class="alert alert-error">Scan failed: {{ scan.error_message or 'Unknown error' }}</div>
 {% endif %}
 
-{% if findings %}
+{% set sa_findings = findings | selectattr("source", "equalto", "sa-probe") | list %}
+{% set other_findings = findings | rejectattr("source", "equalto", "sa-probe") | list %}
+
+{% if sa_findings %}
+<div class="card" style="border:1px solid #f59e0b33">
+  <div class="card-title" style="color:#92400e">🔑 Runtime SA Probe — {{ sa_findings|length }} confirmed exposure{{ 's' if sa_findings|length != 1 else '' }}</div>
+  <p style="font-size:12px;color:#64748b;margin-bottom:14px">
+    These findings were confirmed at runtime using <code>kubectl auth can-i --as</code> impersonation.
+    Each service account was probed against sensitive API verbs — the access listed below is proven, not theoretical.
+  </p>
+  {% for f in sa_findings %}
+  <div class="sa-probe-section">
+    <div class="finding-header">
+      <div class="finding-title">{{ f.title }}</div>
+      <span class="badge badge-{{ f.severity|lower }}">{{ f.severity }}</span>
+      <span class="badge" style="background:#fef3c7;color:#92400e">sa-probe</span>
+    </div>
+    <div class="finding-meta">
+      <span><code>{{ f.check_id }}</code></span>
+      <span>{{ f.context }}</span>
+    </div>
+    <div class="finding-detail">{{ f.detail }}</div>
+    {% if f.attack_scenario %}
+    <div class="finding-scenario">⚡ {{ f.attack_scenario }}</div>
+    {% endif %}
+    <div class="finding-fix">🔧 {{ f.remediation }}</div>
+    {% if f.suggested_patch %}
+    <div class="finding-patch">
+      <div class="patch-label">🔧 AI-Generated Patch</div>
+      <pre class="patch-code">{{ f.suggested_patch }}</pre>
+      {% if f.patch_explanation %}<div class="patch-explanation">{{ f.patch_explanation }}</div>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if other_findings %}
 <div class="card" style="padding:0">
   <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9" class="flex items-center gap-3">
-    <span class="card-title" style="margin:0">{{ findings|length }} findings</span>
+    <span class="card-title" style="margin:0">{{ other_findings|length }} finding{{ 's' if other_findings|length != 1 else '' }}</span>
     {% if scan.critical_count %}<span class="badge badge-critical">{{ scan.critical_count }} Critical</span>{% endif %}
     {% if scan.high_count %}<span class="badge badge-high">{{ scan.high_count }} High</span>{% endif %}
     {% if scan.medium_count %}<span class="badge badge-medium">{{ scan.medium_count }} Medium</span>{% endif %}
     {% if scan.low_count %}<span class="badge badge-low">{{ scan.low_count }} Low</span>{% endif %}
   </div>
   <div style="padding:16px 20px">
-    {% for f in findings %}
+    {% for f in other_findings %}
     <div class="finding {{ f.severity }}">
       <div class="finding-header">
         <div class="finding-title">{{ f.title }}</div>
@@ -52,11 +101,18 @@
       {% if f.telco_relevance %}
       <div class="finding-scenario" style="color:#0284c7;background:#e0f2fe">📡 {{ f.telco_relevance }}</div>
       {% endif %}
+      {% if f.suggested_patch %}
+      <div class="finding-patch">
+        <div class="patch-label">🔧 AI-Generated Patch</div>
+        <pre class="patch-code">{{ f.suggested_patch }}</pre>
+        {% if f.patch_explanation %}<div class="patch-explanation">{{ f.patch_explanation }}</div>{% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
 </div>
-{% elif scan.status == 'done' %}
+{% elif scan.status == 'done' and not sa_findings %}
 <div class="card">
   <div class="empty"><div class="empty-icon">✅</div><h3>No findings</h3><p>Clean scan — no misconfigurations detected.</p></div>
 </div>

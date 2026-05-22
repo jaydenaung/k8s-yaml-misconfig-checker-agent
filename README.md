@@ -99,14 +99,16 @@ Claude receives the manifest or cluster target and iteratively calls tools — i
 ```
 load_manifest / render_helm_chart
         ↓
-run_check(ALL)              ← 14 static checks across all resources
+run_check(ALL)                    ← 14 static checks across all resources
         ↓
-lookup_image_cves           ← Trivy scan per unique image
+lookup_image_cves                 ← Trivy scan per unique image
         ↓
-query_cluster               ← kubectl: pods, RBAC, NetworkPolicies, Secrets
+query_cluster                     ← kubectl: pods, RBAC, NetworkPolicies, Secrets
         ↓
-report_finding              ← AI-identified issues static checks missed
-suggest_patch               ← corrected YAML patch for every finding  ★
+probe_service_account             ← runtime SA permission proof via kubectl auth can-i ★
+        ↓
+report_finding                    ← AI-identified issues static checks missed
+suggest_patch                     ← corrected YAML patch for every finding  ★
         ↓
 finish
 ```

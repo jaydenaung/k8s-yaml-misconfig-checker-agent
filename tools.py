@@ -164,6 +164,34 @@ TOOLS = [
         }
     },
     {
+        "name": "probe_service_account",
+        "description": (
+            "Probe what a Kubernetes service account can actually access at runtime, "
+            "using kubectl auth can-i impersonation. Call this after finding auto-mounted "
+            "SA tokens (K8S-008) or suspicious RBAC bindings (K8S-014). "
+            "Returns confirmed access (secrets, configmaps, pods, etc.) as structured data — "
+            "proving exploitability, not just theoretical risk."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace where the service account lives"
+                },
+                "service_account": {
+                    "type": "string",
+                    "description": "Name of the service account to probe"
+                },
+                "target_namespace": {
+                    "type": "string",
+                    "description": "Namespace to check access in. Omit to check in the SA's own namespace."
+                }
+            },
+            "required": ["namespace", "service_account"]
+        }
+    },
+    {
         "name": "suggest_patch",
         "description": (
             "Generate and record a corrected YAML patch for a specific finding. "
@@ -223,14 +251,15 @@ TOOLS = [
 
 def execute_tool(name: str, input_data: Dict, state: Dict) -> Any:
     dispatch = {
-        "load_manifest":     _load_manifest,
-        "render_helm_chart": _render_helm_chart,
-        "query_cluster":     _query_cluster,
-        "run_check":         _run_check,
-        "lookup_image_cves": _lookup_image_cves,
-        "report_finding":    _report_finding,
-        "suggest_patch":     _suggest_patch,
-        "finish":            _finish,
+        "load_manifest":          _load_manifest,
+        "render_helm_chart":      _render_helm_chart,
+        "query_cluster":          _query_cluster,
+        "run_check":              _run_check,
+        "lookup_image_cves":      _lookup_image_cves,
+        "report_finding":         _report_finding,
+        "probe_service_account":  _probe_service_account,
+        "suggest_patch":          _suggest_patch,
+        "finish":                 _finish,
     }
     fn = dispatch.get(name)
     if fn is None:
@@ -539,6 +568,80 @@ def _report_finding(input_data: Dict, state: Dict) -> Dict:
     }
     state["findings"].append(finding)
     return {"recorded": True, "check_id": finding["check_id"], "severity": finding["severity"]}
+
+
+_SA_SENSITIVE_CHECKS = [
+    ("get",    "secrets"),
+    ("list",   "secrets"),
+    ("get",    "configmaps"),
+    ("list",   "configmaps"),
+    ("create", "pods"),
+    ("delete", "pods"),
+    ("create", "deployments"),
+    ("delete", "deployments"),
+    ("list",   "serviceaccounts"),
+    ("create", "clusterrolebindings"),
+    ("delete", "clusterrolebindings"),
+    ("list",   "namespaces"),
+    ("get",    "nodes"),
+]
+
+
+def _probe_service_account(input_data: Dict, state: Dict) -> Dict:
+    namespace      = input_data.get("namespace", "default")
+    sa_name        = input_data.get("service_account", "default")
+    target_ns      = input_data.get("target_namespace") or namespace
+
+    env = dict(os.environ)
+    if state.get("kubeconfig_path"):
+        env["KUBECONFIG"] = state["kubeconfig_path"]
+
+    as_flag = f"system:serviceaccount:{namespace}:{sa_name}"
+
+    confirmed, denied, errors = [], [], []
+    for verb, resource in _SA_SENSITIVE_CHECKS:
+        cmd = ["kubectl", "auth", "can-i", verb, resource, f"--as={as_flag}", "-n", target_ns]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+            (confirmed if r.returncode == 0 and r.stdout.strip() == "yes" else denied).append(
+                f"{verb} {resource}"
+            )
+        except FileNotFoundError:
+            return {"available": False, "message": "kubectl not installed or not configured"}
+        except Exception as e:
+            errors.append(f"{verb} {resource}: {str(e)[:60]}")
+
+    # Find pods in state that mount this SA
+    pods_using_sa = []
+    for r in state.get("resources", []):
+        spec = r.get("spec", {})
+        pod_spec = spec.get("template", {}).get("spec", spec)
+        if pod_spec.get("serviceAccountName", "default") == sa_name:
+            kind = r.get("kind", "Pod")
+            name = r.get("metadata", {}).get("name", "unknown")
+            pods_using_sa.append(f"{kind}/{name}")
+
+    has_secret_access = any("secrets" in c for c in confirmed)
+    risk_level = (
+        "CRITICAL" if (has_secret_access or "create clusterrolebindings" in confirmed)
+        else "HIGH" if confirmed
+        else "LOW"
+    )
+
+    return {
+        "service_account":  sa_name,
+        "namespace":        namespace,
+        "target_namespace": target_ns,
+        "pods_using_sa":    pods_using_sa,
+        "confirmed_access": confirmed,
+        "denied":           denied,
+        "risk_level":       risk_level,
+        "errors":           errors,
+        "summary": (
+            f"SA '{sa_name}' can: {', '.join(confirmed)}." if confirmed
+            else f"SA '{sa_name}' has no dangerous confirmed access."
+        ),
+    }
 
 
 def _suggest_patch(input_data: Dict, state: Dict) -> Dict:

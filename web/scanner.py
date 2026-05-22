@@ -184,7 +184,93 @@ def _cluster_static_checks(kubeconfig_path: Path) -> Tuple[List[Dict], List[Dict
                     f"Namespace '{ns_name}' has no NetworkPolicy — all pod traffic is allowed.",
                     "Add a default-deny NetworkPolicy and allow only required traffic."))
 
+    # SA permission probing
+    findings.extend(_sa_probe_checks(kubeconfig_path, env))
+
     return resources, findings
+
+
+def _sa_probe_checks(kubeconfig_path: Path, env: dict) -> List[Dict]:
+    """Probe service account permissions via kubectl auth can-i --as impersonation."""
+    _SENSITIVE = [
+        ("get",    "secrets"),
+        ("list",   "secrets"),
+        ("get",    "configmaps"),
+        ("list",   "configmaps"),
+        ("create", "pods"),
+        ("delete", "pods"),
+        ("create", "clusterrolebindings"),
+        ("delete", "clusterrolebindings"),
+    ]
+
+    def can_i(verb: str, resource: str, as_flag: str, ns: str) -> bool:
+        try:
+            r = subprocess.run(
+                ["kubectl", "auth", "can-i", verb, resource, f"--as={as_flag}", "-n", ns],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            return r.returncode == 0 and r.stdout.strip() == "yes"
+        except Exception:
+            return False
+
+    # Discover pods and their service accounts
+    try:
+        r = subprocess.run(
+            ["kubectl", "get", "pods", "-A", "-o", "json"],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        if r.returncode != 0:
+            return []
+        pod_data = json.loads(r.stdout)
+    except Exception:
+        return []
+
+    # Build (namespace, sa) → [pod names]
+    sa_pods: Dict[Tuple[str, str], List[str]] = {}
+    for pod in pod_data.get("items", []):
+        spec = pod.get("spec", {})
+        if spec.get("automountServiceAccountToken") is False:
+            continue
+        ns   = pod["metadata"].get("namespace", "default")
+        name = pod["metadata"]["name"]
+        sa   = spec.get("serviceAccountName", "default")
+        sa_pods.setdefault((ns, sa), []).append(name)
+
+    findings: List[Dict] = []
+    for (ns, sa), pods in sa_pods.items():
+        as_flag   = f"system:serviceaccount:{ns}:{sa}"
+        confirmed = [
+            f"{v} {r}" for v, r in _SENSITIVE if can_i(v, r, as_flag, ns)
+        ]
+        if not confirmed:
+            continue
+
+        has_secrets = any("secrets" in c for c in confirmed)
+        severity    = "CRITICAL" if (has_secrets or "create clusterrolebindings" in confirmed) else "HIGH"
+        pod_list    = ", ".join(pods[:5]) + ("…" if len(pods) > 5 else "")
+
+        findings.append({
+            "source":     "sa-probe",
+            "check_id":   "SAP-001",
+            "severity":   severity,
+            "context":    f"ServiceAccount/{sa} ({ns})",
+            "title":      f"SA '{sa}' has runtime-confirmed {'secret' if has_secrets else 'elevated'} access",
+            "detail":     (
+                f"ServiceAccount '{sa}' in namespace '{ns}' is mounted on: {pod_list}. "
+                f"Runtime probe confirmed it can: {', '.join(confirmed)}."
+            ),
+            "remediation": (
+                "Set automountServiceAccountToken: false on the pod spec and create a "
+                "dedicated SA with least-privilege RBAC scoped to specific resource names."
+            ),
+            "resource_path":   "spec.serviceAccountName",
+            "attack_scenario": (
+                f"An attacker who compromises any pod using SA '{sa}' can immediately "
+                f"call the Kubernetes API to: {', '.join(confirmed)}."
+            ),
+        })
+
+    return findings
 
 
 # ── Persistence helpers ───────────────────────────────────────────────────────

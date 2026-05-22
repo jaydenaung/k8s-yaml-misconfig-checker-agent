@@ -49,6 +49,18 @@ You have access to the following tools. Use them methodically:
 - Check namespace-wide RBAC: clusterrolebindings, rolebindings
 - Look for pods with no NetworkPolicy coverage across namespaces
 
+**Service account probing:**
+- After finding auto-mounted SA tokens (K8S-008) or suspicious RBAC bindings (K8S-014),
+  call probe_service_account to confirm what the SA can actually access at runtime.
+- Use the SA name and namespace from the manifest or cluster query.
+- If probe confirms dangerous access (secrets, configmaps, cluster-wide resources):
+  - Call report_finding with check_id="SAP-001", source reflected in detail, and the
+    confirmed_access list in the detail field. Set severity to CRITICAL if secrets are
+    accessible, HIGH otherwise.
+  - Immediately call suggest_patch with the fix (automountServiceAccountToken: false +
+    least-privilege RBAC).
+- This turns a theoretical static finding into a runtime-proven exploit path.
+
 **AI findings:**
 - Use report_finding for issues the static checks did not catch:
   - Logic-level misconfigurations (insecure inter-service trust, permissive ingress)
@@ -245,7 +257,8 @@ _TOOL_ICONS = {
     "run_check":         "🔍",
     "lookup_image_cves": "🛡",
     "report_finding":    "⚠",
-    "suggest_patch":     "🔧",
+    "probe_service_account": "🔑",
+    "suggest_patch":         "🔧",
     "finish":            "✅",
 }
 
@@ -259,6 +272,8 @@ def _log_tool_call(name: str, input_data: Dict) -> None:
         detail = input_data.get("image", "")
     elif name == "report_finding":
         detail = f"[{input_data.get('severity')}] {input_data.get('title', '')}"
+    elif name == "probe_service_account":
+        detail = f"{input_data.get('service_account')} ({input_data.get('namespace')})"
     elif name == "suggest_patch":
         detail = f"[{input_data.get('check_id')}] {input_data.get('context', '')}"
     elif name == "finish":
