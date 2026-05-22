@@ -192,6 +192,26 @@ TOOLS = [
         }
     },
     {
+        "name": "scan_cluster_images",
+        "description": (
+            "Scan container images running in the cluster for CVEs using Trivy. "
+            "Gets images from running pods via kubectl (or from loaded manifest resources), "
+            "deduplicates, scans each with Trivy, and returns CVE counts per image with the "
+            "pods running them. Use after probe_service_account to build compound risk findings: "
+            "correlate CVE signals with misconfiguration and RBAC signals on the same pod."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Namespace to query pods from. Use 'all' for all namespaces (default)."
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "suggest_patch",
         "description": (
             "Generate and record a corrected YAML patch for a specific finding. "
@@ -258,6 +278,7 @@ def execute_tool(name: str, input_data: Dict, state: Dict) -> Any:
         "lookup_image_cves":      _lookup_image_cves,
         "report_finding":         _report_finding,
         "probe_service_account":  _probe_service_account,
+        "scan_cluster_images":    _scan_cluster_images,
         "suggest_patch":          _suggest_patch,
         "finish":                 _finish,
     }
@@ -509,48 +530,53 @@ def _run_check(input_data: Dict, state: Dict) -> Dict:
     }
 
 
-def _lookup_image_cves(input_data: Dict, state: Dict) -> Dict:
-    image = input_data["image"]
+def _trivy_image_scan(image: str) -> Dict:
+    """Shared Trivy helper — returns CVE counts + top critical CVEs, or {} on any failure."""
     try:
         result = subprocess.run(
             ["trivy", "image", "--format", "json", "--quiet", "--no-progress", image],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, text=True, timeout=120,
         )
         if result.returncode not in (0, 1):
-            return {"error": result.stderr[:500] or "trivy returned unexpected exit code"}
-
+            return {}
         data = json.loads(result.stdout)
         counts: Dict[str, int] = {}
-        critical_vulns = []
-
+        top_critical: list = []
         for res in data.get("Results", []):
             for v in res.get("Vulnerabilities") or []:
                 sev = v.get("Severity", "UNKNOWN")
                 counts[sev] = counts.get(sev, 0) + 1
-                if sev == "CRITICAL":
-                    critical_vulns.append({
-                        "id":        v.get("VulnerabilityID"),
-                        "package":   v.get("PkgName"),
-                        "installed": v.get("InstalledVersion"),
-                        "fixed_in":  v.get("FixedVersion"),
-                        "title":     (v.get("Title") or "")[:120],
+                if sev == "CRITICAL" and len(top_critical) < 5:
+                    top_critical.append({
+                        "id":      v.get("VulnerabilityID"),
+                        "package": v.get("PkgName"),
+                        "fixed":   v.get("FixedVersion"),
                     })
-
         return {
-            "image": image,
-            "vulnerability_counts": counts,
-            "critical_vulnerabilities": critical_vulns[:10],
-            "total": sum(counts.values()),
+            "critical":     counts.get("CRITICAL", 0),
+            "high":         counts.get("HIGH", 0),
+            "medium":       counts.get("MEDIUM", 0),
+            "low":          counts.get("LOW", 0),
+            "total":        sum(counts.values()),
+            "top_critical": top_critical,
         }
-
     except FileNotFoundError:
-        return {"available": False, "message": "Trivy not installed. Install from https://aquasecurity.github.io/trivy/"}
-    except subprocess.TimeoutExpired:
-        return {"error": "Trivy scan timed out after 120s"}
-    except json.JSONDecodeError:
-        return {"error": "Could not parse Trivy JSON output"}
-    except Exception as e:
-        return {"error": str(e)}
+        return {}
+    except Exception:
+        return {}
+
+
+def _lookup_image_cves(input_data: Dict, state: Dict) -> Dict:
+    image = input_data["image"]
+    cves = _trivy_image_scan(image)
+    if not cves:
+        return {"available": False, "message": "Trivy not installed or scan failed. Install from https://aquasecurity.github.io/trivy/"}
+    return {
+        "image":                    image,
+        "vulnerability_counts":     {k: cves[k] for k in ("critical", "high", "medium", "low")},
+        "critical_vulnerabilities": cves.get("top_critical", []),
+        "total":                    cves["total"],
+    }
 
 
 def _report_finding(input_data: Dict, state: Dict) -> Dict:
@@ -640,6 +666,80 @@ def _probe_service_account(input_data: Dict, state: Dict) -> Dict:
         "summary": (
             f"SA '{sa_name}' can: {', '.join(confirmed)}." if confirmed
             else f"SA '{sa_name}' has no dangerous confirmed access."
+        ),
+    }
+
+
+def _scan_cluster_images(input_data: Dict, state: Dict) -> Dict:
+    namespace = input_data.get("namespace", "all")
+    env = dict(os.environ)
+    if state.get("kubeconfig_path"):
+        env["KUBECONFIG"] = state["kubeconfig_path"]
+
+    # Build image → [pod contexts] from state resources (manifest scan)
+    # or from live cluster (cluster scan)
+    image_pods: Dict[str, list] = {}
+
+    if state.get("resources"):
+        for r in state["resources"]:
+            spec = r.get("spec", {})
+            pod_spec = spec.get("template", {}).get("spec", spec)
+            kind = r.get("kind", "Pod")
+            name = r.get("metadata", {}).get("name", "unknown")
+            ctx  = f"{kind}/{name}"
+            for c in pod_spec.get("containers", []) + pod_spec.get("initContainers", []):
+                img = c.get("image")
+                if img:
+                    image_pods.setdefault(img, []).append(ctx)
+    else:
+        cmd = ["kubectl", "get", "pods", "-o", "json"]
+        cmd += ["-A"] if namespace == "all" else ["-n", namespace]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+            if r.returncode != 0:
+                return {"error": r.stderr[:300] or "kubectl failed"}
+            for pod in json.loads(r.stdout).get("items", []):
+                ns   = pod["metadata"].get("namespace", "default")
+                name = pod["metadata"]["name"]
+                ctx  = f"Pod/{name} ({ns})"
+                spec = pod.get("spec", {})
+                for c in spec.get("containers", []) + spec.get("initContainers", []):
+                    img = c.get("image")
+                    if img:
+                        image_pods.setdefault(img, []).append(ctx)
+        except FileNotFoundError:
+            return {"available": False, "message": "kubectl not installed or not configured"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    if not image_pods:
+        return {"images_scanned": 0, "message": "No images found"}
+
+    results = []
+    for image, pods in image_pods.items():
+        cves = _trivy_image_scan(image)
+        results.append({
+            "image":         image,
+            "pods":          pods,
+            "critical_cves": cves.get("critical", 0),
+            "high_cves":     cves.get("high", 0),
+            "medium_cves":   cves.get("medium", 0),
+            "low_cves":      cves.get("low", 0),
+            "total_cves":    cves.get("total", 0),
+            "top_critical":  cves.get("top_critical", []),
+            "trivy_available": bool(cves),
+        })
+
+    results.sort(key=lambda x: x["critical_cves"], reverse=True)
+    high_risk = [r for r in results if r["critical_cves"] > 0 or r["high_cves"] > 5]
+
+    return {
+        "images_scanned":    len(results),
+        "high_risk_images":  len(high_risk),
+        "results":           results,
+        "summary": (
+            f"Scanned {len(results)} unique images. "
+            f"{len(high_risk)} have significant CVEs (critical > 0 or high > 5)."
         ),
     }
 

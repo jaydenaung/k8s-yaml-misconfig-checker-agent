@@ -187,6 +187,9 @@ def _cluster_static_checks(kubeconfig_path: Path) -> Tuple[List[Dict], List[Dict
     # SA permission probing
     findings.extend(_sa_probe_checks(kubeconfig_path, env))
 
+    # Compound risk correlation
+    findings.extend(_correlate_risks(findings, kubeconfig_path, env))
+
     return resources, findings
 
 
@@ -271,6 +274,140 @@ def _sa_probe_checks(kubeconfig_path: Path, env: dict) -> List[Dict]:
         })
 
     return findings
+
+
+def _correlate_risks(findings: List[Dict], kubeconfig_path: Path, env: dict) -> List[Dict]:
+    """Correlate CVE + misconfiguration + RBAC + network signals into compound findings."""
+    # ── Collect running pods ────────────────────────────────────────────────
+    try:
+        r = subprocess.run(
+            ["kubectl", "get", "pods", "-A", "-o", "json"],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        if r.returncode != 0:
+            return []
+        pods = json.loads(r.stdout).get("items", [])
+    except Exception:
+        return []
+
+    # ── Index existing findings ─────────────────────────────────────────────
+    misconfig_contexts: set = set()   # pod contexts with CRITICAL/HIGH static findings
+    sa_danger: set = set()            # SA names confirmed dangerous by sa-probe
+    no_netpol_ns: set = set()         # namespaces without NetworkPolicy
+
+    for f in findings:
+        ctx = f.get("context", "")
+        sev = f.get("severity", "")
+        src = f.get("source", "")
+        if src == "sa-probe":
+            # "ServiceAccount/sa-name (ns)" → extract sa name
+            sa_name = ctx.split("/")[1].split(" ")[0] if "/" in ctx else ctx
+            sa_danger.add(sa_name)
+        elif src in ("static", "claude-ai") and sev in ("CRITICAL", "HIGH"):
+            misconfig_contexts.add(ctx)
+        if f.get("check_id") == "K8S-010":
+            ns = ctx.replace("Namespace/", "").strip()
+            no_netpol_ns.add(ns)
+
+    # ── Scan unique images with Trivy ───────────────────────────────────────
+    unique_images: set = set()
+    for pod in pods:
+        for c in pod.get("spec", {}).get("containers", []):
+            img = c.get("image")
+            if img:
+                unique_images.add(img)
+
+    image_cves: Dict[str, Dict] = {}
+    for img in unique_images:
+        image_cves[img] = _trivy_scan(img)
+
+    # ── Correlate per pod ───────────────────────────────────────────────────
+    compound: List[Dict] = []
+    seen_pods: set = set()
+
+    for pod in pods:
+        ns    = pod["metadata"].get("namespace", "default")
+        name  = pod["metadata"]["name"]
+        spec  = pod.get("spec", {})
+        sa    = spec.get("serviceAccountName", "default")
+        ctx   = f"Pod/{name} ({ns})"
+
+        if ctx in seen_pods:
+            continue
+        seen_pods.add(ctx)
+
+        images = [c.get("image") for c in spec.get("containers", []) if c.get("image")]
+
+        # Gather signals
+        signals:        List[str] = []
+        signal_details: List[str] = []
+        chain:          List[str] = []
+
+        # CVE signal
+        worst_cves = {}
+        for img in images:
+            cves = image_cves.get(img, {})
+            if cves.get("critical", 0) > 0 or cves.get("high", 0) > 5:
+                if cves.get("critical", 0) > worst_cves.get("critical", 0):
+                    worst_cves = {**cves, "image": img}
+        if worst_cves:
+            signals.append("cve")
+            signal_details.append(
+                f"Image {worst_cves['image']}: "
+                f"{worst_cves.get('critical',0)} critical CVEs, "
+                f"{worst_cves.get('high',0)} high CVEs"
+            )
+            chain.append(f"exploit CVE in {worst_cves['image']}")
+
+        # Misconfiguration signal
+        if ctx in misconfig_contexts:
+            signals.append("misconfiguration")
+            signal_details.append("Pod has CRITICAL/HIGH misconfigurations (privileged, root, hostPID…)")
+            chain.append("leverage misconfiguration for container escape / host access")
+
+        # RBAC signal
+        if sa in sa_danger:
+            signals.append("rbac")
+            signal_details.append(f"SA '{sa}' has runtime-confirmed dangerous API access")
+            chain.append("use mounted SA token to access Kubernetes secrets via API")
+
+        # Network exposure signal
+        if ns in no_netpol_ns:
+            signals.append("network")
+            signal_details.append(f"Namespace '{ns}' has no NetworkPolicy — unrestricted pod traffic")
+            chain.append("reach pod from other namespaces or internet (no NetworkPolicy)")
+
+        if len(signals) < 2:
+            continue
+
+        has_cve   = "cve" in signals
+        has_rbac  = "rbac" in signals
+        has_misc  = "misconfiguration" in signals
+        severity  = "CRITICAL" if (has_cve and has_rbac) or (has_cve and has_misc and len(signals) >= 3) else "HIGH"
+        check_id  = f"CMP-00{min(len(signals), 4)}"
+
+        compound.append({
+            "source":     "compound",
+            "check_id":   check_id,
+            "severity":   severity,
+            "context":    ctx,
+            "title":      f"Compound risk ({len(signals)} signals): {' + '.join(signals)}",
+            "detail":     (
+                f"This pod has {len(signals)} correlated risk signals:\n"
+                + "\n".join(f"• {d}" for d in signal_details)
+            ),
+            "remediation": (
+                "Prioritise by exploitability: "
+                "1) Patch or replace the vulnerable image. "
+                "2) Remove misconfiguration (privileged:false, runAsNonRoot:true). "
+                "3) Set automountServiceAccountToken:false and tighten RBAC. "
+                "4) Add a default-deny NetworkPolicy."
+            ),
+            "attack_scenario": "Attacker chain: " + " → ".join(chain) + ".",
+            "resource_path": "",
+        })
+
+    return compound
 
 
 # ── Persistence helpers ───────────────────────────────────────────────────────

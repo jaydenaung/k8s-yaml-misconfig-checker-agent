@@ -33,8 +33,60 @@
 <div class="alert alert-error">Scan failed: {{ scan.error_message or 'Unknown error' }}</div>
 {% endif %}
 
+{% set compound_findings = findings | selectattr("source", "equalto", "compound") | list %}
 {% set sa_findings = findings | selectattr("source", "equalto", "sa-probe") | list %}
-{% set other_findings = findings | rejectattr("source", "equalto", "sa-probe") | list %}
+{% set other_findings = findings | rejectattr("source", "equalto", "compound") | rejectattr("source", "equalto", "sa-probe") | list %}
+
+{% if compound_findings %}
+<div class="card" style="border:1px solid #7c3aed33;background:linear-gradient(135deg,#faf5ff08,#ede9fe05)">
+  <div class="card-title" style="color:#6d28d9">
+    🔗 Compound Risk Correlation — {{ compound_findings|length }} compound exposure{{ 's' if compound_findings|length != 1 else '' }}
+  </div>
+  <p style="font-size:12px;color:#64748b;margin-bottom:16px">
+    These findings combine multiple independent risk signals on the same pod.
+    Each signal alone is reportable — together they form a proven exploit chain.
+  </p>
+  {% for f in compound_findings %}
+  {% set signal_list = f.title.split(': ')[1].split(' + ') if ': ' in f.title else [] %}
+  <div class="finding {{ f.severity }}" style="border-left-color:#7c3aed">
+    <div class="finding-header">
+      <div class="finding-title">{{ f.context }}</div>
+      <span class="badge badge-{{ f.severity|lower }}">{{ f.severity }}</span>
+      <span class="badge" style="background:#ede9fe;color:#6d28d9">{{ f.check_id }}</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px;margin:8px 0">
+      {% for sig in signal_list %}
+      {% if sig == 'cve' %}
+        <span class="signal-chip chip-cve">🦠 CVE</span>
+      {% elif sig == 'misconfiguration' %}
+        <span class="signal-chip chip-misc">⚠ Misconfiguration</span>
+      {% elif sig == 'rbac' %}
+        <span class="signal-chip chip-rbac">🔑 RBAC Escalation</span>
+      {% elif sig == 'network' %}
+        <span class="signal-chip chip-net">🌐 Network Exposure</span>
+      {% else %}
+        <span class="signal-chip chip-misc">{{ sig }}</span>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="finding-detail" style="white-space:pre-line">{{ f.detail }}</div>
+    {% if f.attack_scenario %}
+    <div class="finding-scenario" style="background:#f5f3ff;color:#6d28d9;margin-top:8px">
+      ⛓ {{ f.attack_scenario }}
+    </div>
+    {% endif %}
+    <div class="finding-fix">🔧 {{ f.remediation }}</div>
+    {% if f.suggested_patch %}
+    <div class="finding-patch">
+      <div class="patch-label">🔧 AI-Generated Patch</div>
+      <pre class="patch-code">{{ f.suggested_patch }}</pre>
+      {% if f.patch_explanation %}<div class="patch-explanation">{{ f.patch_explanation }}</div>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 {% if sa_findings %}
 <div class="card" style="border:1px solid #f59e0b33">

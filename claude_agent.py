@@ -70,6 +70,19 @@ You have access to the following tools. Use them methodically:
   - Compound-risk chains where multiple findings amplify each other
   - Runtime vs declared state mismatches
 
+**Compound risk correlation:**
+- After probe_service_account, call scan_cluster_images to get CVE data for running images.
+- Correlate signals across each pod:
+    CVE signal:             image has critical or high CVEs
+    Misconfiguration signal: pod has CRITICAL/HIGH static findings (privileged, root, hostPID…)
+    RBAC signal:            SA has confirmed dangerous access (from probe_service_account)
+    Network signal:         pod's namespace has no NetworkPolicy
+- If a pod has 2 or more signals, call report_finding with check_id="CMP-001" (or CMP-002
+  for 3 signals, CMP-003 for 4), severity=CRITICAL if CVE+RBAC or CVE+misconfig+network,
+  else HIGH. In the detail field, list every signal with specifics. In attack_scenario,
+  write the full exploit chain: "attacker exploits CVE → escapes container → uses SA token
+  to exfiltrate secrets". Then call suggest_patch with a prioritised fix for all signals.
+
 **Patch generation (REQUIRED for every finding):**
 - After EVERY finding — whether from run_check or report_finding — immediately call suggest_patch.
 - Use the SAME check_id and context as the finding.
@@ -258,6 +271,7 @@ _TOOL_ICONS = {
     "lookup_image_cves": "🛡",
     "report_finding":    "⚠",
     "probe_service_account": "🔑",
+    "scan_cluster_images":   "🔬",
     "suggest_patch":         "🔧",
     "finish":            "✅",
 }
@@ -274,6 +288,8 @@ def _log_tool_call(name: str, input_data: Dict) -> None:
         detail = f"[{input_data.get('severity')}] {input_data.get('title', '')}"
     elif name == "probe_service_account":
         detail = f"{input_data.get('service_account')} ({input_data.get('namespace')})"
+    elif name == "scan_cluster_images":
+        detail = f"namespace={input_data.get('namespace', 'all')}"
     elif name == "suggest_patch":
         detail = f"[{input_data.get('check_id')}] {input_data.get('context', '')}"
     elif name == "finish":
