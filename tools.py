@@ -164,6 +164,47 @@ TOOLS = [
         }
     },
     {
+        "name": "suggest_patch",
+        "description": (
+            "Generate and record a corrected YAML patch for a specific finding. "
+            "Call this immediately after every report_finding call, and after run_check "
+            "identifies static findings. Use the same check_id and context as the finding. "
+            "Provide the minimal corrected YAML snippet — just the fixed field(s) with "
+            "enough parent-key context to be unambiguous."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "check_id": {
+                    "type": "string",
+                    "description": "The check ID this patch addresses — must match the finding (e.g. K8S-001 or AI-001)"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Resource context — must match the finding (e.g. Deployment/nginx)"
+                },
+                "patch_yaml": {
+                    "type": "string",
+                    "description": (
+                        "Corrected YAML snippet showing the fixed field(s) with parent key context. "
+                        "Example for a root-user finding:\n"
+                        "spec:\n"
+                        "  template:\n"
+                        "    spec:\n"
+                        "      securityContext:\n"
+                        "        runAsNonRoot: true\n"
+                        "        runAsUser: 1000"
+                    )
+                },
+                "explanation": {
+                    "type": "string",
+                    "description": "One sentence explaining what was changed and why it fixes the issue."
+                }
+            },
+            "required": ["check_id", "context", "patch_yaml", "explanation"]
+        }
+    },
+    {
         "name": "finish",
         "description": "End the analysis. Call this when all checks are complete and all findings are reported.",
         "input_schema": {
@@ -188,6 +229,7 @@ def execute_tool(name: str, input_data: Dict, state: Dict) -> Any:
         "run_check":         _run_check,
         "lookup_image_cves": _lookup_image_cves,
         "report_finding":    _report_finding,
+        "suggest_patch":     _suggest_patch,
         "finish":            _finish,
     }
     fn = dispatch.get(name)
@@ -497,6 +539,29 @@ def _report_finding(input_data: Dict, state: Dict) -> Dict:
     }
     state["findings"].append(finding)
     return {"recorded": True, "check_id": finding["check_id"], "severity": finding["severity"]}
+
+
+def _suggest_patch(input_data: Dict, state: Dict) -> Dict:
+    check_id  = input_data.get("check_id", "")
+    context   = input_data.get("context", "")
+    patch     = input_data.get("patch_yaml", "")
+    explanation = input_data.get("explanation", "")
+
+    # Attach patch to the most-recently-added matching finding (exact match first)
+    for f in reversed(state["findings"]):
+        if f.get("check_id") == check_id and f.get("context") == context:
+            f["suggested_patch"]   = patch
+            f["patch_explanation"] = explanation
+            return {"recorded": True, "matched": "exact", "check_id": check_id}
+
+    # Fallback: match by check_id only (for static findings where context may vary)
+    for f in reversed(state["findings"]):
+        if f.get("check_id") == check_id and not f.get("suggested_patch"):
+            f["suggested_patch"]   = patch
+            f["patch_explanation"] = explanation
+            return {"recorded": True, "matched": "check_id_only", "check_id": check_id}
+
+    return {"recorded": False, "reason": "no matching finding found", "check_id": check_id}
 
 
 def _finish(input_data: Dict, state: Dict) -> Dict:

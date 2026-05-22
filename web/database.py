@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import (Boolean, Column, DateTime, Integer, String, Text,
-                        create_engine)
+                        create_engine, text)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATA_DIR = Path("data")
@@ -86,8 +86,10 @@ class Finding(Base):
     detail          = Column(Text, nullable=True)
     remediation     = Column(Text, nullable=True)
     resource_path   = Column(String(256), nullable=True)
-    attack_scenario = Column(Text, nullable=True)
-    telco_relevance = Column(Text, nullable=True)
+    attack_scenario   = Column(Text, nullable=True)
+    telco_relevance   = Column(Text, nullable=True)
+    suggested_patch   = Column(Text, nullable=True)
+    patch_explanation = Column(Text, nullable=True)
 
 
 class Image(Base):
@@ -104,8 +106,24 @@ class Image(Base):
     scanned_at   = Column(DateTime, default=datetime.utcnow)
 
 
+def _migrate():
+    """Add columns introduced after the initial schema — safe to run on every startup."""
+    new_columns = [
+        ("findings", "suggested_patch",   "TEXT"),
+        ("findings", "patch_explanation", "TEXT"),
+    ]
+    with engine.connect() as conn:
+        for table, col, coltype in new_columns:
+            try:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}"))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate()
 
 
 @contextmanager

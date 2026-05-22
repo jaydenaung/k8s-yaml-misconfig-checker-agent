@@ -206,6 +206,8 @@ def _persist_findings(db, scan: Scan, findings: List[Dict]) -> None:
             resource_path=f.get("resource_path"),
             attack_scenario=f.get("attack_scenario"),
             telco_relevance=f.get("telco_relevance"),
+            suggested_patch=f.get("suggested_patch"),
+            patch_explanation=f.get("patch_explanation"),
         ))
     scan.critical_count = counts.get("CRITICAL", 0)
     scan.high_count     = counts.get("HIGH", 0)

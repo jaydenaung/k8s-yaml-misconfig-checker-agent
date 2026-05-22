@@ -58,6 +58,23 @@ You have access to the following tools. Use them methodically:
   - Compound-risk chains where multiple findings amplify each other
   - Runtime vs declared state mismatches
 
+**Patch generation (REQUIRED for every finding):**
+- After EVERY finding — whether from run_check or report_finding — immediately call suggest_patch.
+- Use the SAME check_id and context as the finding.
+- patch_yaml must be a minimal corrected YAML snippet showing only the changed field(s)
+  with enough parent-key indentation to be unambiguous. Do NOT reproduce the entire manifest.
+- Example for a privileged container finding on Deployment/api:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: api
+            securityContext:
+              privileged: false
+              runAsNonRoot: true
+              runAsUser: 1000
+- explanation: one sentence on what changed and why it fixes the issue.
+
 **Finishing:**
 - Call finish() when analysis is complete
 
@@ -228,6 +245,7 @@ _TOOL_ICONS = {
     "run_check":         "🔍",
     "lookup_image_cves": "🛡",
     "report_finding":    "⚠",
+    "suggest_patch":     "🔧",
     "finish":            "✅",
 }
 
@@ -241,6 +259,8 @@ def _log_tool_call(name: str, input_data: Dict) -> None:
         detail = input_data.get("image", "")
     elif name == "report_finding":
         detail = f"[{input_data.get('severity')}] {input_data.get('title', '')}"
+    elif name == "suggest_patch":
+        detail = f"[{input_data.get('check_id')}] {input_data.get('context', '')}"
     elif name == "finish":
         detail = (input_data.get("summary") or "")[:80]
     else:
