@@ -1,0 +1,55 @@
+# samples/test-sa-probe.yaml
+# Intentionally over-privileged workload for testing KubeSentinel SA probe
+# DO NOT deploy in production
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vulnerable-sa
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vulnerable-role
+rules:
+- apiGroups: [""]
+  resources: ["secrets", "configmaps", "pods", "serviceaccounts"]
+  verbs: ["get", "list", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vulnerable-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: vulnerable-role
+subjects:
+- kind: ServiceAccount
+  name: vulnerable-sa
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vulnerable-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vulnerable-app
+  template:
+    metadata:
+      labels:
+        app: vulnerable-app
+    spec:
+      serviceAccountName: vulnerable-sa
+      automountServiceAccountToken: true
+      containers:
+      - name: app
+        image: nginx:latest
+        securityContext:
+          privileged: true
+          runAsUser: 0
