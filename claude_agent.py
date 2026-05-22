@@ -104,7 +104,7 @@ def analyze_cluster_with_agent(
     model: str = None,
 ) -> Tuple[List[Dict], List[Dict]]:
     """Agentic analysis of a live cluster via kubectl using an uploaded kubeconfig."""
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=3)
     model = model or DEFAULT_MODEL
 
     state: Dict = {
@@ -177,7 +177,7 @@ def analyze_with_agent(
     Run the agentic analysis loop.
     Returns (resources, findings).
     """
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=3)
     model = model or DEFAULT_MODEL
 
     state: Dict = {
