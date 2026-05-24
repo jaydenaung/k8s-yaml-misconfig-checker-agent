@@ -305,5 +305,5 @@ def render_pr_comment(
 def save_report(report: str, output_path: str):
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(report)

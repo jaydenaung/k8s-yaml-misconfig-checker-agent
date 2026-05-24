@@ -278,6 +278,8 @@ def _sa_probe_checks(kubeconfig_path: Path, env: dict) -> List[Dict]:
     except Exception:
         return []
 
+    _SYSTEM_NS = {"kube-system", "kube-public", "kube-node-lease"}
+
     # Build (namespace, sa) → [pod names]
     sa_pods: Dict[Tuple[str, str], List[str]] = {}
     for pod in pod_data.get("items", []):
@@ -285,6 +287,8 @@ def _sa_probe_checks(kubeconfig_path: Path, env: dict) -> List[Dict]:
         if spec.get("automountServiceAccountToken") is False:
             continue
         ns   = pod["metadata"].get("namespace", "default")
+        if ns in _SYSTEM_NS:
+            continue
         name = pod["metadata"]["name"]
         sa   = spec.get("serviceAccountName", "default")
         sa_pods.setdefault((ns, sa), []).append(name)
@@ -367,8 +371,11 @@ def _correlate_risks(findings: List[Dict], kubeconfig_path: Path, env: dict) -> 
             if img:
                 unique_images.add(img)
 
+    scannable_images = {img for img in unique_images if not _is_unscannable(img)}
+    capped_images = set(list(scannable_images)[:8])
+
     image_cves: Dict[str, Dict] = {}
-    for img in unique_images:
+    for img in capped_images:
         image_cves[img] = _trivy_scan(img)
 
     # ── Correlate per pod ───────────────────────────────────────────────────
@@ -489,12 +496,28 @@ def _persist_findings(db, scan: Scan, findings: List[Dict]) -> None:
     scan.info_count     = counts.get("INFO", 0)
 
 
+_UNSCANNABLE_PREFIXES = (
+    "docker/desktop-",
+    "registry.k8s.io/pause",
+    "k8s.gcr.io/pause",
+)
+
+
+def _is_unscannable(image: str) -> bool:
+    if "@sha256:" in image:
+        return True
+    return any(image.startswith(p) for p in _UNSCANNABLE_PREFIXES)
+
+
 def _trivy_scan(image_ref: str) -> Dict:
     """Run Trivy against a single image. Returns CVE counts or empty dict if unavailable."""
+    if _is_unscannable(image_ref):
+        return {}
     try:
         result = subprocess.run(
-            ["trivy", "image", "--format", "json", "--quiet", "--no-progress", image_ref],
-            capture_output=True, text=True, timeout=120,
+            ["trivy", "image", "--format", "json", "--quiet", "--no-progress",
+             "--skip-java-db-update", image_ref],
+            capture_output=True, text=True, timeout=45,
         )
         if result.returncode not in (0, 1):
             return {}
@@ -537,7 +560,7 @@ def _extract_images(db, scan: Scan, resources: List[Dict]) -> None:
         )
         for c in all_containers:
             img = c.get("image")
-            if img and img not in seen:
+            if img and img not in seen and not _is_unscannable(img):
                 seen.add(img)
                 cves = _trivy_scan(img)
                 db.add(Image(

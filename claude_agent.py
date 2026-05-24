@@ -276,8 +276,8 @@ def generate_patches_for_findings(
     Runs a minimal agentic loop with only suggest_patch + finish tools.
     Returns the findings list with suggested_patch / patch_explanation fields populated.
     """
-    unpached = [f for f in findings if not f.get("suggested_patch")]
-    if not unpached:
+    unpatched = [f for f in findings if not f.get("suggested_patch")]
+    if not unpatched:
         return findings
 
     client = anthropic.Anthropic(api_key=api_key, max_retries=3)
@@ -289,13 +289,13 @@ def generate_patches_for_findings(
 
     findings_summary = "\n".join(
         f"- [{f.get('check_id','?')}] {f.get('context','?')}: {f.get('title','?')} ({f.get('severity','?')})"
-        for f in unpached
+        for f in unpatched
     )
 
     messages = [{
         "role": "user",
         "content": (
-            f"Generate corrected YAML patches for each of the {len(unpached)} findings below. "
+            f"Generate corrected YAML patches for each of the {len(unpatched)} findings below. "
             "For each, call suggest_patch with the same check_id and context as the finding, "
             "a minimal patch_yaml snippet (just the changed field(s) with parent-key context), "
             "and a one-sentence explanation. Call finish() when all patches are generated.\n\n"
