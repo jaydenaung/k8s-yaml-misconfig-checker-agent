@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import (Boolean, Column, DateTime, Integer, String, Text,
-                        create_engine, text)
+from sqlalchemy import (Boolean, Column, DateTime, Float, Integer, String,
+                        Text, create_engine, text)
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATA_DIR = Path("data")
@@ -72,7 +72,14 @@ class Scan(Base):
     info_count     = Column(Integer, default=0)
     triggered_by    = Column(String(64), nullable=True)    # username or "scheduler"
     error_message   = Column(Text, nullable=True)
-    patches_status  = Column(String(16), default="none")  # none | generating | done | failed
+    patches_status      = Column(String(16), default="none")   # none | generating | done | failed
+    enrichment_status   = Column(String(16), default="none")   # none | generating | done | failed
+    # AI token usage (accumulated across all AI steps for this scan)
+    input_tokens          = Column(Integer, default=0)
+    output_tokens         = Column(Integer, default=0)
+    cache_creation_tokens = Column(Integer, default=0)
+    cache_read_tokens     = Column(Integer, default=0)
+    estimated_cost_usd    = Column(Float,   default=0.0)
     # Compliance scan fields (null for vulnerability scans).
     framework       = Column(String(64), nullable=True)    # e.g. "cis-kubernetes-1.9"
     compliance_score = Column(Integer, nullable=True)      # 0-100, cached for fast list rendering
@@ -155,7 +162,13 @@ def _migrate():
         ("scans",    "pass_count",        "INTEGER DEFAULT 0"),
         ("scans",    "fail_count",        "INTEGER DEFAULT 0"),
         ("scans",    "skip_count",        "INTEGER DEFAULT 0"),
-        ("scans",    "manual_count",      "INTEGER DEFAULT 0"),
+        ("scans",    "manual_count",        "INTEGER DEFAULT 0"),
+        ("scans",    "enrichment_status",    "TEXT DEFAULT 'none'"),
+        ("scans",    "input_tokens",          "INTEGER DEFAULT 0"),
+        ("scans",    "output_tokens",         "INTEGER DEFAULT 0"),
+        ("scans",    "cache_creation_tokens", "INTEGER DEFAULT 0"),
+        ("scans",    "cache_read_tokens",     "INTEGER DEFAULT 0"),
+        ("scans",    "estimated_cost_usd",    "REAL DEFAULT 0.0"),
     ]
     with engine.connect() as conn:
         for table, col, coltype in new_columns:

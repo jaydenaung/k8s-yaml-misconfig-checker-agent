@@ -28,7 +28,7 @@ _SYSTEM_PROMPT_BASE = """You are a senior Kubernetes security architect with dee
 - NSA/CISA Kubernetes Hardening Guide
 - CIS Kubernetes Benchmark
 - MITRE ATT&CK for Containers
-- Telco/CNF security (5G core, CNF sidecars, service mesh)
+- Cloud-native workload security (CNF, service mesh, DPDK, CNI)
 - Supply chain security (image provenance, SBOMs, CVEs)
 
 You have access to the following tools. Use them methodically:
@@ -64,7 +64,7 @@ You have access to the following tools. Use them methodically:
   - Logic-level misconfigurations (insecure inter-service trust, permissive ingress)
   - Supply chain risks beyond static rules
   - Missing AppArmor / seccomp annotations
-  - Telco/CNF concerns (5G NF sidecars, service mesh misconfig, DPDK, CNI)
+  - Cloud-native concerns (service mesh misconfig, CNF sidecars, DPDK, CNI)
   - Compound-risk chains where multiple findings amplify each other
   - Runtime vs declared state mismatches
 
@@ -99,6 +99,37 @@ _PATCH_GEN_SYSTEM = (
 
 MAX_ITERATIONS = 25
 
+# Pricing for claude-sonnet-4-6 (USD per token)
+_PRICING = {
+    "input":        3.00 / 1_000_000,
+    "output":      15.00 / 1_000_000,
+    "cache_write":  3.75 / 1_000_000,
+    "cache_read":   0.30 / 1_000_000,
+}
+
+
+def _cost(usage: Dict) -> float:
+    return (
+        usage.get("input_tokens", 0)          * _PRICING["input"] +
+        usage.get("output_tokens", 0)         * _PRICING["output"] +
+        usage.get("cache_creation_tokens", 0) * _PRICING["cache_write"] +
+        usage.get("cache_read_tokens", 0)     * _PRICING["cache_read"]
+    )
+
+
+def _cached(text: str) -> list:
+    """Wrap a system prompt string for prompt caching."""
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
+def _accum(usage: Dict, response) -> None:
+    """Accumulate token counts from an API response into a usage dict."""
+    u = response.usage
+    usage["input_tokens"]          += getattr(u, "input_tokens", 0)
+    usage["output_tokens"]         += getattr(u, "output_tokens", 0)
+    usage["cache_creation_tokens"] += getattr(u, "cache_creation_input_tokens", 0)
+    usage["cache_read_tokens"]     += getattr(u, "cache_read_input_tokens", 0)
+
 
 _SCAN_TOOLS = build_tools(patch_enabled=False)   # patches are always post-scan
 _PATCH_TOOLS = build_tools(patch_enabled=True)    # only used by generate_patches_for_findings
@@ -110,8 +141,8 @@ def analyze_cluster_with_agent(
     api_key: str,
     verbose: bool = False,
     model: str = None,
-) -> Tuple[List[Dict], List[Dict]]:
-    """Agentic analysis of a live cluster via kubectl using an uploaded kubeconfig."""
+) -> Tuple[List[Dict], List[Dict], Dict]:
+    """Agentic analysis of a live cluster. Returns (resources, findings, token_usage)."""
     client = anthropic.Anthropic(api_key=api_key, max_retries=3)
     model = model or DEFAULT_MODEL
 
@@ -122,6 +153,7 @@ def analyze_cluster_with_agent(
         "summary":         "",
         "kubeconfig_path": str(kubeconfig_path),
     }
+    usage: Dict = {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
 
     messages = [
         {
@@ -143,11 +175,11 @@ def analyze_cluster_with_agent(
         response = client.messages.create(
             model=model,
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            system=_cached(SYSTEM_PROMPT),
             tools=_SCAN_TOOLS,
             messages=messages,
         )
-
+        _accum(usage, response)
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason == "end_turn":
@@ -175,7 +207,8 @@ def analyze_cluster_with_agent(
         if state.get("done"):
             break
 
-    return state["resources"], state["findings"]
+    usage["estimated_cost_usd"] = _cost(usage)
+    return state["resources"], state["findings"], usage
 
 
 def analyze_with_agent(
@@ -183,11 +216,8 @@ def analyze_with_agent(
     api_key: str,
     verbose: bool = True,
     model: str = None,
-) -> Tuple[List[Dict], List[Dict]]:
-    """
-    Run the agentic analysis loop.
-    Returns (resources, findings).
-    """
+) -> Tuple[List[Dict], List[Dict], Dict]:
+    """Agentic manifest analysis. Returns (resources, findings, token_usage)."""
     client = anthropic.Anthropic(api_key=api_key, max_retries=3)
     model = model or DEFAULT_MODEL
 
@@ -197,6 +227,7 @@ def analyze_with_agent(
         "done":      False,
         "summary":   "",
     }
+    usage: Dict = {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
 
     if manifest_path.is_dir() and (manifest_path / "Chart.yaml").exists():
         input_hint = (
@@ -226,16 +257,15 @@ def analyze_with_agent(
         response = client.messages.create(
             model=model,
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            system=_cached(SYSTEM_PROMPT),
             tools=_SCAN_TOOLS,
             messages=messages,
         )
-
+        _accum(usage, response)
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason == "end_turn":
             break
-
         if response.stop_reason != "tool_use":
             break
 
@@ -244,13 +274,10 @@ def analyze_with_agent(
             if block.type == "tool_use":
                 if verbose:
                     _log_tool_call(block.name, block.input)
-
                 result = execute_tool(block.name, block.input, state)
-
                 result_json = json.dumps(result)
                 if len(result_json) > 8000:
                     result_json = result_json[:8000] + "\n...[truncated — response too large]"
-
                 tool_results.append({
                     "type":        "tool_result",
                     "tool_use_id": block.id,
@@ -262,7 +289,8 @@ def analyze_with_agent(
         if state.get("done"):
             break
 
-    return state["resources"], state["findings"]
+    usage["estimated_cost_usd"] = _cost(usage)
+    return state["resources"], state["findings"], usage
 
 
 def generate_patches_for_findings(
@@ -270,20 +298,19 @@ def generate_patches_for_findings(
     api_key: str,
     verbose: bool = False,
     model: str = None,
-) -> List[Dict]:
+) -> Tuple[List[Dict], Dict]:
     """
-    Post-scan patch generation — works on any findings list (static or AI scan).
-    Runs a minimal agentic loop with only suggest_patch + finish tools.
-    Returns the findings list with suggested_patch / patch_explanation fields populated.
+    Post-scan patch generation. Returns (findings_with_patches, token_usage).
     """
     unpatched = [f for f in findings if not f.get("suggested_patch")]
     if not unpatched:
-        return findings
+        return findings, {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0, "estimated_cost_usd": 0.0}
 
     client = anthropic.Anthropic(api_key=api_key, max_retries=3)
     model = model or DEFAULT_MODEL
 
     state: Dict = {"resources": [], "findings": list(findings), "done": False, "summary": ""}
+    usage: Dict = {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
 
     patch_only_tools = [t for t in _PATCH_TOOLS if t["name"] in ("suggest_patch", "finish")]
 
@@ -307,11 +334,11 @@ def generate_patches_for_findings(
         response = client.messages.create(
             model=model,
             max_tokens=4096,
-            system=_PATCH_GEN_SYSTEM,
+            system=_cached(_PATCH_GEN_SYSTEM),
             tools=patch_only_tools,
             messages=messages,
         )
-
+        _accum(usage, response)
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason in ("end_turn",):
@@ -336,7 +363,115 @@ def generate_patches_for_findings(
         if state.get("done"):
             break
 
-    return state["findings"]
+    usage["estimated_cost_usd"] = _cost(usage)
+    return state["findings"], usage
+
+
+_ENRICH_SYSTEM = (
+    "You are a Kubernetes security architect. "
+    "For each finding, call enrich_finding with a concrete attack_scenario "
+    "(1-3 sentences: how an attacker exploits this specific misconfiguration, referencing the context). "
+    "Call finish() when all findings have been enriched."
+)
+
+_ENRICH_TOOLS = [
+    {
+        "name": "enrich_finding",
+        "description": "Add a concrete attack_scenario to a finding.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "check_id":        {"type": "string"},
+                "context":         {"type": "string"},
+                "attack_scenario": {"type": "string", "description": "1-3 sentences: concrete attacker exploit chain for this misconfiguration."},
+            },
+            "required": ["check_id", "context", "attack_scenario"],
+        },
+    },
+    {
+        "name": "finish",
+        "description": "Signal that all findings have been enriched.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+
+def enrich_findings_with_ai(
+    findings: List[Dict],
+    api_key: str,
+    model: str = None,
+) -> Tuple[List[Dict], Dict]:
+    """
+    Post-scan AI enrichment. Returns (enriched_findings, token_usage).
+    """
+    to_enrich = [f for f in findings if not f.get("attack_scenario")]
+    if not to_enrich:
+        return findings, {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0, "estimated_cost_usd": 0.0}
+
+    client = anthropic.Anthropic(api_key=api_key, max_retries=3)
+    model = model or DEFAULT_MODEL
+
+    enriched: Dict[tuple, Dict] = {}
+    for f in findings:
+        enriched[(f.get("check_id"), f.get("context"))] = f
+
+    usage: Dict = {"input_tokens": 0, "output_tokens": 0, "cache_creation_tokens": 0, "cache_read_tokens": 0}
+
+    summary = "\n".join(
+        f"- [{f.get('check_id','?')}] {f.get('context','?')}: {f.get('title','?')} "
+        f"({f.get('severity','?')}) — {(f.get('detail') or '')[:120]}"
+        for f in to_enrich
+    )
+
+    messages = [{
+        "role": "user",
+        "content": (
+            f"Enrich each of the {len(to_enrich)} Kubernetes security findings below. "
+            "For each, call enrich_finding with the same check_id and context as listed "
+            "and a concrete attack_scenario (how an attacker exploits this specific issue). "
+            "Call finish() when done.\n\n"
+            f"FINDINGS:\n{summary}"
+        ),
+    }]
+
+    done = False
+    for _ in range(MAX_ITERATIONS):
+        response = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=_cached(_ENRICH_SYSTEM),
+            tools=_ENRICH_TOOLS,
+            messages=messages,
+        )
+        _accum(usage, response)
+        messages.append({"role": "assistant", "content": response.content})
+
+        if response.stop_reason == "end_turn":
+            break
+        if response.stop_reason != "tool_use":
+            break
+
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            if block.name == "finish":
+                done = True
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": '{"ok":true}'})
+                break
+            elif block.name == "enrich_finding":
+                inp = block.input
+                key = (inp.get("check_id"), inp.get("context"))
+                if key in enriched:
+                    enriched[key]["attack_scenario"] = inp.get("attack_scenario")
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": '{"ok":true}'})
+
+        messages.append({"role": "user", "content": tool_results})
+        if done:
+            break
+
+    usage["estimated_cost_usd"] = _cost(usage)
+    return list(enriched.values()), usage
 
 
 _TOOL_ICONS = {

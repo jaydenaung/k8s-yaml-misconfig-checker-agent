@@ -17,11 +17,17 @@ async def scan_status(request: Request, scan_id: int):
         if not scan:
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({
-            "status":          scan.status,
-            "patches_status":  scan.patches_status or "none",
-            "critical_count":  scan.critical_count,
-            "high_count":      scan.high_count,
-            "medium_count":    scan.medium_count,
-            "low_count":       scan.low_count,
-            "error_message":   scan.error_message,
+            "status":                scan.status,
+            "patches_status":        scan.patches_status or "none",
+            "enrichment_status":     scan.enrichment_status or "none",
+            "critical_count":        scan.critical_count,
+            "high_count":            scan.high_count,
+            "medium_count":          scan.medium_count,
+            "low_count":             scan.low_count,
+            "error_message":         scan.error_message,
+            "input_tokens":          scan.input_tokens or 0,
+            "output_tokens":         scan.output_tokens or 0,
+            "cache_creation_tokens": scan.cache_creation_tokens or 0,
+            "cache_read_tokens":     scan.cache_read_tokens or 0,
+            "estimated_cost_usd":    round(scan.estimated_cost_usd or 0.0, 6),
         })

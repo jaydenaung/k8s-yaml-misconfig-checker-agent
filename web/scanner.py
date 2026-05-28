@@ -16,6 +16,15 @@ from web.database import Cluster, Finding, Image, Manifest, Scan, get_db
 SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 
 
+def _add_usage(scan, usage: Dict) -> None:
+    """Accumulate token counts and cost from an AI step onto a Scan record."""
+    scan.input_tokens          = (scan.input_tokens or 0)          + usage.get("input_tokens", 0)
+    scan.output_tokens         = (scan.output_tokens or 0)         + usage.get("output_tokens", 0)
+    scan.cache_creation_tokens = (scan.cache_creation_tokens or 0) + usage.get("cache_creation_tokens", 0)
+    scan.cache_read_tokens     = (scan.cache_read_tokens or 0)     + usage.get("cache_read_tokens", 0)
+    scan.estimated_cost_usd    = (scan.estimated_cost_usd or 0.0)  + usage.get("estimated_cost_usd", 0.0)
+
+
 def run_patch_generation(scan_id: int) -> None:
     """Post-scan patch generation — reads existing findings, calls Claude, saves patches."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -47,7 +56,7 @@ def run_patch_generation(scan_id: int) -> None:
 
         try:
             from claude_agent import generate_patches_for_findings
-            patched = generate_patches_for_findings(findings_data, api_key)
+            patched, usage = generate_patches_for_findings(findings_data, api_key)
 
             for pf in patched:
                 if pf.get("suggested_patch"):
@@ -57,11 +66,59 @@ def run_patch_generation(scan_id: int) -> None:
                             dbf.patch_explanation = pf.get("patch_explanation")
                             break
 
+            _add_usage(scan, usage)
             scan.patches_status = "done"
             db.commit()
 
         except Exception as exc:
             scan.patches_status = "failed"
+            db.commit()
+            raise exc
+
+
+def run_ai_enrichment(scan_id: int) -> None:
+    """Post-scan AI enrichment — adds attack_scenario to existing findings."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return
+
+    with get_db() as db:
+        scan = db.query(Scan).filter(Scan.id == scan_id).first()
+        if not scan:
+            return
+        scan.enrichment_status = "generating"
+        db.commit()
+
+        db_findings = db.query(Finding).filter(Finding.scan_id == scan_id).all()
+        findings_data = [
+            {
+                "check_id":        f.check_id,
+                "context":         f.context,
+                "title":           f.title,
+                "severity":        f.severity,
+                "detail":          f.detail,
+                "attack_scenario": f.attack_scenario,
+            }
+            for f in db_findings
+        ]
+
+        try:
+            from claude_agent import enrich_findings_with_ai
+            enriched, usage = enrich_findings_with_ai(findings_data, api_key)
+
+            for ef in enriched:
+                if ef.get("attack_scenario"):
+                    for dbf in db_findings:
+                        if dbf.check_id == ef["check_id"] and dbf.context == ef["context"]:
+                            dbf.attack_scenario = ef["attack_scenario"]
+                            break
+
+            _add_usage(scan, usage)
+            scan.enrichment_status = "done"
+            db.commit()
+
+        except Exception as exc:
+            scan.enrichment_status = "failed"
             db.commit()
             raise exc
 
@@ -104,7 +161,8 @@ def _run_manifest_scan(db, scan: Scan) -> None:
 
     if scan.scan_mode == "ai" and api_key:
         from claude_agent import analyze_with_agent
-        resources, findings = analyze_with_agent(file_path, api_key, verbose=False)
+        resources, findings, usage = analyze_with_agent(file_path, api_key, verbose=False)
+        _add_usage(scan, usage)
     else:
         resources = load_manifests(file_path)
         findings = run_static_checks(resources)
@@ -133,9 +191,10 @@ def _run_cluster_scan(db, scan: Scan) -> None:
 
     if scan.scan_mode == "ai" and api_key:
         from claude_agent import analyze_cluster_with_agent
-        resources, findings = analyze_cluster_with_agent(
+        resources, findings, usage = analyze_cluster_with_agent(
             cluster.name, kubeconfig_path, api_key, verbose=False
         )
+        _add_usage(scan, usage)
     else:
         resources, findings = _cluster_static_checks(kubeconfig_path)
 

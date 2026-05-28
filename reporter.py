@@ -141,11 +141,6 @@ def render_report(
                 f"**Attack scenario:** {f.get('attack_scenario')}",
                 "",
             ]
-        if f.get("telco_relevance"):
-            lines += [
-                f"**Telco/CNF relevance:** {f.get('telco_relevance')}",
-                "",
-            ]
 
         lines.append("---")
         lines.append("")

@@ -21,9 +21,40 @@
       <span class="badge badge-{{ scan.status }}">{{ scan.status }}</span>
       {% if scan.triggered_by %} · by {{ scan.triggered_by }}{% endif %}
     </div>
+    {% if scan.input_tokens or scan.output_tokens %}
+    <div style="margin-top:6px;font-size:12px;color:#64748b;display:flex;gap:12px;flex-wrap:wrap">
+      <span title="Input tokens">↓ {{ "{:,}".format(scan.input_tokens or 0) }} in</span>
+      <span title="Output tokens">↑ {{ "{:,}".format(scan.output_tokens or 0) }} out</span>
+      {% if scan.cache_read_tokens %}
+      <span style="color:#16a34a" title="Cache read tokens (cheaper)">⚡ {{ "{:,}".format(scan.cache_read_tokens) }} cached</span>
+      {% endif %}
+      {% if scan.estimated_cost_usd %}
+      <span style="color:#7c3aed;font-weight:600" title="Estimated cost (Sonnet 4.6 pricing)">${{ "%.4f"|format(scan.estimated_cost_usd) }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
   <div class="flex gap-2 items-center">
     {% if scan.status == 'done' %}
+      {# ── Enrich with AI ── #}
+      {% if scan.enrichment_status in ('none', None) %}
+      <form method="post" action="/scans/{{ scan.id }}/enrich" style="margin:0">
+        <button type="submit" class="btn btn-secondary" style="border-color:#0284c7;color:#0284c7">
+          🧠 Enrich with AI
+        </button>
+      </form>
+      {% elif scan.enrichment_status == 'generating' %}
+      <span style="font-size:13px;color:#0284c7"><span class="spinner" style="border-top-color:#0284c7;border-color:#e0f2fe"></span> Enriching…</span>
+      {% elif scan.enrichment_status == 'done' %}
+      <span style="font-size:12px;color:#0284c7;background:#e0f2fe;padding:4px 10px;border-radius:10px">🧠 AI enriched</span>
+      {% elif scan.enrichment_status == 'failed' %}
+      <form method="post" action="/scans/{{ scan.id }}/enrich" style="margin:0">
+        <button type="submit" class="btn btn-secondary" style="border-color:#dc2626;color:#dc2626" title="Enrichment failed — retry">
+          ↺ Retry Enrich
+        </button>
+      </form>
+      {% endif %}
+      {# ── AI Patches ── #}
       {% if scan.patches_status == 'none' %}
       <form method="post" action="/scans/{{ scan.id }}/patches" style="margin:0">
         <button type="submit" class="btn btn-secondary" style="border-color:#7c3aed;color:#7c3aed">
@@ -32,7 +63,6 @@
       </form>
       {% elif scan.patches_status == 'generating' %}
       <span style="font-size:13px;color:#7c3aed"><span class="spinner" style="border-top-color:#7c3aed;border-color:#ede9fe"></span> Generating patches…</span>
-      <script>(function poll(){setTimeout(function(){fetch('/api/scans/{{ scan.id }}/status').then(r=>r.json()).then(d=>{if(d.patches_status==='done'||d.patches_status==='failed'){location.reload();}else{poll();}}).catch(poll);},4000);})();</script>
       {% elif scan.patches_status == 'done' %}
       <span style="font-size:12px;color:#16a34a;background:#dcfce7;padding:4px 10px;border-radius:10px">✅ Patches generated</span>
       {% elif scan.patches_status == 'failed' %}
@@ -45,6 +75,22 @@
     {% endif %}
     <a href="javascript:history.back()" class="btn btn-secondary">← Back</a>
   </div>
+  {% if scan.status == 'done' and (scan.enrichment_status == 'generating' or scan.patches_status == 'generating') %}
+  <script>
+  (function poll(){
+    setTimeout(function(){
+      fetch('/api/scans/{{ scan.id }}/status').then(r=>r.json()).then(d=>{
+        var enrichDone  = d.enrichment_status==='done'  || d.enrichment_status==='failed';
+        var patchesDone = d.patches_status==='done'     || d.patches_status==='failed';
+        var enriching   = d.enrichment_status==='generating';
+        var patching    = d.patches_status==='generating';
+        if((enrichDone||!enriching) && (patchesDone||!patching)) { location.reload(); }
+        else { poll(); }
+      }).catch(poll);
+    }, 4000);
+  })();
+  </script>
+  {% endif %}
 </div>
 
 {% if scan.status in ('queued', 'running') %}
@@ -171,9 +217,6 @@
       <div class="finding-fix">🔧 {{ f.remediation }}</div>
       {% if f.attack_scenario %}
       <div class="finding-scenario">⚡ {{ f.attack_scenario }}</div>
-      {% endif %}
-      {% if f.telco_relevance %}
-      <div class="finding-scenario" style="color:#0284c7;background:#e0f2fe">📡 {{ f.telco_relevance }}</div>
       {% endif %}
       {% if f.suggested_patch %}
       <div class="finding-patch">

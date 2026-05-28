@@ -9,23 +9,31 @@
   <a href="/manifests" class="btn btn-secondary">← Back</a>
 </div>
 
-{% if latest_scan and latest_scan.status in ('queued', 'running') %}
+{% if latest_scan %}
+{% if latest_scan.status in ('queued', 'running') %}
 <div class="alert alert-info" id="scan-status-banner">
   <span class="spinner"></span>
   Scan #{{ latest_scan.id }} is <strong>{{ latest_scan.status }}</strong> — results will appear automatically.
 </div>
+{% endif %}
+{% if latest_scan.status in ('queued', 'running') or latest_scan.enrichment_status == 'generating' %}
 <script>
 (function poll() {
   setTimeout(function() {
     fetch('/api/scans/{{ latest_scan.id }}/status')
       .then(r => r.json())
       .then(d => {
-        if (d.status === 'done' || d.status === 'failed') { location.reload(); }
+        var scanDone      = d.status === 'done' || d.status === 'failed';
+        var enrichDone    = d.enrichment_status === 'done' || d.enrichment_status === 'failed';
+        var stillRunning  = d.status === 'queued' || d.status === 'running';
+        var enrichRunning = d.enrichment_status === 'generating';
+        if ((!stillRunning && !enrichRunning) || scanDone || enrichDone) { location.reload(); }
         else { poll(); }
       }).catch(poll);
   }, 3000);
 })();
 </script>
+{% endif %}
 {% endif %}
 
 {% if latest_scan and latest_scan.status == 'failed' %}
@@ -84,16 +92,58 @@
     <div class="card">
       <div class="card-title">Run New Scan</div>
       <form method="post" action="/manifests/{{ manifest.id }}/scan">
-        <div class="form-group">
-          <label class="form-label">Scan Mode</label>
-          <select name="scan_mode" class="form-control">
-            <option value="ai">🤖 AI Agent</option>
-            <option value="static">⚡ Static only</option>
-          </select>
-        </div>
+        <input type="hidden" name="scan_mode" value="static">
         <button type="submit" class="btn btn-primary" style="width:100%">Start Scan</button>
       </form>
     </div>
+
+    {% if latest_scan and latest_scan.status == 'done' %}
+    <div class="card">
+      <div class="card-title">AI Enrichment</div>
+      {% if latest_scan.enrichment_status in ('none', None) %}
+      <form method="post" action="/scans/{{ latest_scan.id }}/enrich">
+        <button type="submit" class="btn btn-secondary" style="width:100%;border-color:#0284c7;color:#0284c7">
+          🧠 Enrich with AI
+        </button>
+      </form>
+      <p class="form-hint" style="margin-top:8px">Adds attack scenarios to findings.</p>
+      {% elif latest_scan.enrichment_status == 'generating' %}
+      <div style="text-align:center;padding:8px 0;font-size:13px;color:#0284c7">
+        <span class="spinner" style="border-top-color:#0284c7;border-color:#e0f2fe"></span> Enriching findings…
+      </div>
+      {% elif latest_scan.enrichment_status == 'done' %}
+      <div style="font-size:12px;color:#0284c7;background:#e0f2fe;padding:6px 10px;border-radius:6px;text-align:center">
+        🧠 AI enriched
+      </div>
+      {% elif latest_scan.enrichment_status == 'failed' %}
+      <form method="post" action="/scans/{{ latest_scan.id }}/enrich">
+        <button type="submit" class="btn btn-secondary" style="width:100%;border-color:#dc2626;color:#dc2626">
+          ↺ Retry Enrich
+        </button>
+      </form>
+      {% endif %}
+      {% if latest_scan.input_tokens or latest_scan.output_tokens %}
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9;font-size:11px;color:#64748b">
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span>Input tokens</span><span>{{ "{:,}".format(latest_scan.input_tokens or 0) }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+          <span>Output tokens</span><span>{{ "{:,}".format(latest_scan.output_tokens or 0) }}</span>
+        </div>
+        {% if latest_scan.cache_read_tokens %}
+        <div style="display:flex;justify-content:space-between;margin-bottom:3px;color:#16a34a">
+          <span>⚡ Cache hits</span><span>{{ "{:,}".format(latest_scan.cache_read_tokens) }}</span>
+        </div>
+        {% endif %}
+        {% if latest_scan.estimated_cost_usd %}
+        <div style="display:flex;justify-content:space-between;margin-top:5px;padding-top:5px;border-top:1px solid #f1f5f9;font-weight:600;color:#7c3aed">
+          <span>Est. cost</span><span>${{ "%.4f"|format(latest_scan.estimated_cost_usd) }}</span>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
 
     {% if scans %}
     <div class="card">

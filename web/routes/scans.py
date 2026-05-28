@@ -4,7 +4,7 @@ from fastapi.templating import Jinja2Templates
 
 from web.auth import check_login
 from web.database import Finding, Scan, get_db
-from web.scanner import run_patch_generation
+from web.scanner import run_ai_enrichment, run_patch_generation
 
 router = APIRouter()
 templates = Jinja2Templates(directory="web/templates")
@@ -56,4 +56,25 @@ async def generate_patches(
             return RedirectResponse(f"/scans/{scan_id}", status_code=302)
 
     background_tasks.add_task(run_patch_generation, scan_id)
+    return RedirectResponse(f"/scans/{scan_id}", status_code=302)
+
+
+@router.post("/scans/{scan_id}/enrich")
+async def enrich_with_ai(
+    request: Request,
+    scan_id: int,
+    background_tasks: BackgroundTasks,
+):
+    result = check_login(request)
+    if isinstance(result, RedirectResponse):
+        return result
+
+    with get_db() as db:
+        scan = db.query(Scan).filter(Scan.id == scan_id).first()
+        if not scan or scan.status != "done":
+            return RedirectResponse(f"/scans/{scan_id}", status_code=302)
+        if scan.enrichment_status in ("generating", "done"):
+            return RedirectResponse(f"/scans/{scan_id}", status_code=302)
+
+    background_tasks.add_task(run_ai_enrichment, scan_id)
     return RedirectResponse(f"/scans/{scan_id}", status_code=302)

@@ -148,7 +148,7 @@ TOOLS = [
         "description": (
             "Record a security finding you identified that the static checks did not catch. "
             "Use this for logic-level issues, supply chain risks, inter-service trust problems, "
-            "cluster runtime misconfigurations, and telco/CNF-specific concerns."
+            "and cluster runtime misconfigurations."
         ),
         "input_schema": {
             "type": "object",
@@ -160,8 +160,7 @@ TOOLS = [
                 "detail":          {"type": "string", "description": "What the problem is and why it matters"},
                 "remediation":     {"type": "string", "description": "Specific steps to fix it"},
                 "resource_path":   {"type": "string", "description": "YAML path to the problematic field"},
-                "attack_scenario": {"type": "string", "description": "One sentence: how an attacker exploits this"},
-                "telco_relevance": {"type": "string", "description": "Relevance to telco/CNF workloads"}
+                "attack_scenario": {"type": "string", "description": "One sentence: how an attacker exploits this"}
             },
             "required": ["check_id", "severity", "context", "title", "detail", "remediation"]
         }
@@ -769,7 +768,6 @@ def _report_finding(input_data: Dict, state: Dict) -> Dict:
         "remediation":     input_data.get("remediation", ""),
         "resource_path":   input_data.get("resource_path", ""),
         "attack_scenario": input_data.get("attack_scenario", ""),
-        "telco_relevance": input_data.get("telco_relevance", ""),
     }
     state["findings"].append(finding)
     return {"recorded": True, "check_id": finding["check_id"], "severity": finding["severity"]}
