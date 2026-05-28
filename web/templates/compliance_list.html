@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Compliance — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Compliance</div>
+    <div class="page-subtitle">CIS Kubernetes Benchmark scans across all onboarded clusters</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Framework</div>
+  <p class="text-sm text-muted">
+    Active framework: <code>{{ default_framework }}</code> &mdash; Tier 1 (read-only API scan).
+    Worker-node checks land in the next slice via Trusted Scan Mode.
+  </p>
+</div>
+
+<div class="card">
+  <div class="card-title">Clusters</div>
+  {% if rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Cluster</th>
+          <th>Score</th>
+          <th>Last scan</th>
+          <th>Pass / Fail / Skip / Manual</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set c = row.cluster %}
+        {% set s = row.latest_scan %}
+        <tr>
+          <td><strong>{{ c.name }}</strong></td>
+          <td>
+            {% if s and s.compliance_score is not none %}
+              <span class="score-pill score-{{ row.score_band }}">{{ s.compliance_score }}%</span>
+            {% else %}
+              <span class="score-pill score-unknown">—</span>
+            {% endif %}
+          </td>
+          <td class="text-muted">
+            {% if s and s.completed_at %}{{ s.completed_at.strftime('%Y-%m-%d %H:%M') }}
+            {% elif s %}—
+            {% else %}Never{% endif %}
+          </td>
+          <td>
+            {% if s %}
+              <span class="badge badge-pass">{{ s.pass_count or 0 }} pass</span>
+              <span class="badge badge-fail">{{ s.fail_count or 0 }} fail</span>
+              <span class="badge badge-skip">{{ s.skip_count or 0 }} skip</span>
+              <span class="badge badge-manual">{{ s.manual_count or 0 }} manual</span>
+            {% else %}
+              <span class="text-muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if s %}
+              <span class="badge badge-{{ s.status }}">
+                {% if s.status == 'running' %}<span class="spinner"></span> {% endif %}
+                {{ s.status }}
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="text-right">
+            <form method="post" action="/compliance/clusters/{{ c.id }}/scan" style="display:inline">
+              <button type="submit" class="btn btn-primary btn-sm">Run CIS Scan</button>
+            </form>
+            {% if s %}
+              <a href="/compliance/scans/{{ s.id }}" class="btn btn-secondary btn-sm">View</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    <div class="empty-icon">✓</div>
+    <h3>No clusters onboarded yet</h3>
+    <p>Onboard a cluster on the <a href="/clusters" class="td-link">Clusters</a> page,
+       then return here to run a CIS Benchmark scan.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

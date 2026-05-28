@@ -24,7 +24,7 @@ from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from web.database import has_users, init_db
-from web.routes import api, auth, clusters, dashboard, images, manifests, scans, setup, users
+from web.routes import api, auth, clusters, compliance, dashboard, images, manifests, scans, setup, users
 from web.scheduler import restore_schedules, scheduler
 
 
@@ -48,6 +48,7 @@ app.include_router(manifests.router)
 app.include_router(clusters.router)
 app.include_router(images.router)
 app.include_router(scans.router)
+app.include_router(compliance.router)
 app.include_router(users.router)
 app.include_router(api.router)
 

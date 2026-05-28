@@ -1,0 +1,27 @@
+{
+  "kind": "PodList",
+  "apiVersion": "v1",
+  "items": [
+    {
+      "metadata": {
+        "name": "kube-apiserver-master-1",
+        "namespace": "kube-system",
+        "labels": {"component": "kube-apiserver"}
+      },
+      "spec": {
+        "containers": [
+          {
+            "name": "kube-apiserver",
+            "image": "registry.k8s.io/kube-apiserver:v1.29.0",
+            "command": ["kube-apiserver"],
+            "args": [
+              "--anonymous-auth=true",
+              "--authorization-mode=AlwaysAllow",
+              "--profiling=true"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

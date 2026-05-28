@@ -1,0 +1,24 @@
+{
+  "kind": "ClusterRoleBindingList",
+  "apiVersion": "rbac.authorization.k8s.io/v1",
+  "items": [
+    {
+      "metadata": {"name": "cluster-admin"},
+      "roleRef": {"name": "cluster-admin", "kind": "ClusterRole"},
+      "subjects": [{"kind": "Group", "name": "system:masters"}]
+    },
+    {
+      "metadata": {"name": "extra-admin-binding"},
+      "roleRef": {"name": "cluster-admin", "kind": "ClusterRole"},
+      "subjects": [
+        {"kind": "ServiceAccount", "name": "deployer", "namespace": "default"},
+        {"kind": "User", "name": "alice@example.com"}
+      ]
+    },
+    {
+      "metadata": {"name": "view-everywhere"},
+      "roleRef": {"name": "view", "kind": "ClusterRole"},
+      "subjects": [{"kind": "Group", "name": "developers"}]
+    }
+  ]
+}

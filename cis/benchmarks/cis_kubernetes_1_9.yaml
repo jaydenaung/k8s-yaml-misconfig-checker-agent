@@ -1,0 +1,483 @@
+# CIS Kubernetes Benchmark v1.9.0 — KubeSentinel MVP slice
+# Covers: API server (9) + Controller Manager (3) + Scheduler (2) + etcd (3) + RBAC/Policies (3) = 20 checks
+#
+# All checks in this file are Tier 1 (pure API reads, no node access).
+# Worker-node file-permission checks land in cis_kubernetes_1_9_worker.yaml
+# once Tier 2 (Trusted Scan Mode) ships.
+
+version: "1.9"
+title: "CIS Kubernetes Benchmark v1.9.0 (Control Plane + Policies)"
+target_k8s_versions: ["1.27", "1.28", "1.29", "1.30"]
+
+checks:
+
+  # ── 1.2 API Server ─────────────────────────────────────────────────────────
+  - id: CIS-1.2.1
+    title: "Ensure that the --anonymous-auth argument is set to false"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--anonymous-auth"
+    expected:
+      operator: equals
+      value: "false"
+    remediation: |
+      Edit /etc/kubernetes/manifests/kube-apiserver.yaml on each control
+      plane node and set: --anonymous-auth=false
+    references:
+      cis: "1.2.1"
+      nist_800_53: ["AC-3", "AC-6"]
+      soc2: ["CC6.1"]
+
+  - id: CIS-1.2.2
+    title: "Ensure that the --token-auth-file parameter is not set"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg_absent
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--token-auth-file"
+    expected:
+      operator: equals
+      value: "absent"
+    remediation: |
+      Remove the --token-auth-file=<filename> parameter from
+      /etc/kubernetes/manifests/kube-apiserver.yaml. Use a stronger
+      authentication mechanism (OIDC, ServiceAccount tokens, mTLS).
+    references:
+      cis: "1.2.2"
+      nist_800_53: ["IA-5"]
+
+  - id: CIS-1.2.5
+    title: "Ensure that the --kubelet-certificate-authority argument is set"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--kubelet-certificate-authority"
+    expected:
+      operator: exists
+    remediation: |
+      Set --kubelet-certificate-authority=<path-to-ca-cert> so the API server
+      verifies the kubelet's serving certificate against a known CA.
+    references:
+      cis: "1.2.5"
+
+  - id: CIS-1.2.6
+    title: "Ensure that the --authorization-mode argument is not set to AlwaysAllow"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: CRITICAL
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--authorization-mode"
+    expected:
+      operator: regex
+      value: "^(?!.*AlwaysAllow).*$"
+    remediation: |
+      Set --authorization-mode to a list including Node and RBAC, e.g.
+      --authorization-mode=Node,RBAC. AlwaysAllow disables all authorization.
+    references:
+      cis: "1.2.7"
+      nist_800_53: ["AC-3"]
+
+  - id: CIS-1.2.7
+    title: "Ensure that the --authorization-mode includes Node"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--authorization-mode"
+    expected:
+      operator: regex
+      value: "Node"
+    remediation: |
+      Include 'Node' in --authorization-mode so the Node authorizer restricts
+      kubelets to only read objects related to their own pods.
+    references:
+      cis: "1.2.8"
+
+  - id: CIS-1.2.8
+    title: "Ensure that the --authorization-mode includes RBAC"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--authorization-mode"
+    expected:
+      operator: regex
+      value: "RBAC"
+    remediation: |
+      Include 'RBAC' in --authorization-mode to enable role-based access
+      control on the cluster.
+    references:
+      cis: "1.2.9"
+
+  - id: CIS-1.2.16
+    title: "Ensure that the --profiling argument is set to false"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--profiling"
+    expected:
+      operator: equals
+      value: "false"
+    remediation: |
+      Set --profiling=false on the API server. Profiling exposes /debug/pprof
+      endpoints that can leak sensitive information.
+    references:
+      cis: "1.2.16"
+      nist_800_53: ["SI-4"]
+
+  - id: CIS-1.2.17
+    title: "Ensure that the --audit-log-path argument is set"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--audit-log-path"
+    expected:
+      operator: exists
+    remediation: |
+      Set --audit-log-path=/var/log/apiserver/audit.log (or your audit
+      sink path) so API requests are recorded for forensic review.
+    references:
+      cis: "1.2.18"
+      soc2: ["CC7.2"]
+      nist_800_53: ["AU-2"]
+
+  - id: CIS-1.2.21
+    title: "Ensure that the --service-account-lookup argument is true"
+    section: "1.2 API Server"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-apiserver"
+      container: kube-apiserver
+      arg: "--service-account-lookup"
+    expected:
+      operator: equals
+      value: "true"
+    remediation: |
+      Set --service-account-lookup=true so tokens of deleted ServiceAccounts
+      are rejected instead of being honoured indefinitely.
+    references:
+      cis: "1.2.22"
+
+  # ── 1.3 Controller Manager ─────────────────────────────────────────────────
+  - id: CIS-1.3.2
+    title: "Ensure that the --profiling argument is set to false (controller manager)"
+    section: "1.3 Controller Manager"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-controller-manager"
+      container: kube-controller-manager
+      arg: "--profiling"
+    expected:
+      operator: equals
+      value: "false"
+    remediation: |
+      Set --profiling=false on the controller manager.
+    references:
+      cis: "1.3.2"
+
+  - id: CIS-1.3.3
+    title: "Ensure that the --use-service-account-credentials argument is true"
+    section: "1.3 Controller Manager"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-controller-manager"
+      container: kube-controller-manager
+      arg: "--use-service-account-credentials"
+    expected:
+      operator: equals
+      value: "true"
+    remediation: |
+      Set --use-service-account-credentials=true so each controller uses a
+      distinct service account rather than a shared identity.
+    references:
+      cis: "1.3.3"
+
+  - id: CIS-1.3.7
+    title: "Ensure that the --root-ca-file argument is set (controller manager)"
+    section: "1.3 Controller Manager"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-controller-manager"
+      container: kube-controller-manager
+      arg: "--root-ca-file"
+    expected:
+      operator: exists
+    remediation: |
+      Set --root-ca-file to the API server CA so pods can verify the
+      API server's serving certificate.
+    references:
+      cis: "1.3.7"
+
+  # ── 1.4 Scheduler ──────────────────────────────────────────────────────────
+  - id: CIS-1.4.1
+    title: "Ensure that the --profiling argument is set to false (scheduler)"
+    section: "1.4 Scheduler"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-scheduler"
+      container: kube-scheduler
+      arg: "--profiling"
+    expected:
+      operator: equals
+      value: "false"
+    remediation: |
+      Set --profiling=false on the scheduler.
+    references:
+      cis: "1.4.1"
+
+  - id: CIS-1.4.2
+    title: "Ensure that the --bind-address argument is 127.0.0.1 (scheduler)"
+    section: "1.4 Scheduler"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=kube-scheduler"
+      container: kube-scheduler
+      arg: "--bind-address"
+    expected:
+      operator: equals
+      value: "127.0.0.1"
+    remediation: |
+      Set --bind-address=127.0.0.1 so the scheduler health/metrics ports
+      are not reachable from outside the node.
+    references:
+      cis: "1.4.2"
+
+  # ── 2 etcd ─────────────────────────────────────────────────────────────────
+  - id: CIS-2.2
+    title: "Ensure that the --client-cert-auth argument is set to true (etcd)"
+    section: "2 etcd"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: CRITICAL
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=etcd"
+      container: etcd
+      arg: "--client-cert-auth"
+    expected:
+      operator: equals
+      value: "true"
+    remediation: |
+      Set --client-cert-auth=true on etcd. Without mTLS to etcd, anyone
+      with network reach to the etcd port can read or modify all cluster
+      data (including secrets).
+    references:
+      cis: "2.2"
+      nist_800_53: ["IA-2", "AC-3"]
+      soc2: ["CC6.1"]
+
+  - id: CIS-2.3
+    title: "Ensure that the --auto-tls argument is not set to true (etcd)"
+    section: "2 etcd"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=etcd"
+      container: etcd
+      arg: "--auto-tls"
+    expected:
+      operator: in
+      values: ["false", null]
+    remediation: |
+      Either omit --auto-tls or set it to false. Auto-generated etcd
+      certificates do not provide identity guarantees.
+    references:
+      cis: "2.3"
+
+  - id: CIS-2.5
+    title: "Ensure that the --peer-client-cert-auth argument is set to true (etcd)"
+    section: "2 etcd"
+    scored: true
+    level: 1
+    profile: control-plane
+    tier: api
+    severity: HIGH
+    audit:
+      type: static_pod_arg
+      namespace: kube-system
+      label_selector: "component=etcd"
+      container: etcd
+      arg: "--peer-client-cert-auth"
+    expected:
+      operator: equals
+      value: "true"
+    remediation: |
+      Set --peer-client-cert-auth=true so etcd peer connections require
+      mutual TLS.
+    references:
+      cis: "2.5"
+
+  # ── 5.1 RBAC and Service Accounts ──────────────────────────────────────────
+  - id: CIS-5.1.1
+    title: "Ensure that the cluster-admin role is only used where required"
+    section: "5.1 RBAC and Service Accounts"
+    scored: false
+    level: 1
+    profile: policies
+    tier: api
+    severity: HIGH
+    audit:
+      type: rbac_subject_count
+      role_ref: cluster-admin
+      exclude_bootstrap: true
+    expected:
+      operator: lte
+      value: "1"
+    remediation: |
+      Remove ClusterRoleBindings to cluster-admin that are not strictly
+      required. Prefer purpose-built ClusterRoles scoped to the minimum
+      verbs and resources needed.
+    references:
+      cis: "5.1.1"
+      nist_800_53: ["AC-6"]
+      soc2: ["CC6.1", "CC6.3"]
+
+  - id: CIS-5.1.5
+    title: "Ensure that default service accounts are not actively used"
+    section: "5.1 RBAC and Service Accounts"
+    scored: true
+    level: 1
+    profile: policies
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: default_sa_automount
+      include_system_namespaces: false
+    expected:
+      operator: equals
+      value: "false"
+    remediation: |
+      For every non-system namespace, patch the default ServiceAccount to
+      set automountServiceAccountToken: false:
+        kubectl patch sa default -n <namespace> -p \\
+          '{"automountServiceAccountToken": false}'
+      Create dedicated ServiceAccounts for workloads that genuinely need
+      API access.
+    references:
+      cis: "5.1.5"
+      nist_800_53: ["AC-6"]
+
+  - id: CIS-5.1.6
+    title: "Ensure that ServiceAccount tokens are only mounted where necessary"
+    section: "5.1 RBAC and Service Accounts"
+    scored: false
+    level: 1
+    profile: policies
+    tier: api
+    severity: MEDIUM
+    audit:
+      type: default_sa_automount
+      include_system_namespaces: false
+    expected:
+      operator: equals
+      value: "false"
+    remediation: |
+      Audit every workload and set automountServiceAccountToken: false on
+      the pod spec unless the workload genuinely calls the Kubernetes API.
+    references:
+      cis: "5.1.6"

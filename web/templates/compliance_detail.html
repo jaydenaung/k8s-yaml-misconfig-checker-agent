@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ cluster.name if cluster else '?' }} — CIS Scan #{{ scan.id }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">
+      CIS Scan
+      <span class="text-muted" style="font-weight:400;font-size:14px">
+        &nbsp;·&nbsp; {{ cluster.name if cluster else 'unknown cluster' }}
+      </span>
+    </div>
+    <div class="page-subtitle">
+      Framework: <code>{{ scan.framework }}</code> &nbsp;·&nbsp;
+      Triggered by {{ scan.triggered_by or '—' }} &nbsp;·&nbsp;
+      {% if scan.completed_at %}Completed {{ scan.completed_at.strftime('%Y-%m-%d %H:%M UTC') }}
+      {% elif scan.started_at %}Started {{ scan.started_at.strftime('%Y-%m-%d %H:%M UTC') }}
+      {% else %}Queued{% endif %}
+    </div>
+  </div>
+  <div>
+    <a href="/compliance" class="btn btn-secondary btn-sm">← All clusters</a>
+  </div>
+</div>
+
+{% if scan.status == 'running' or scan.status == 'queued' %}
+<div class="alert alert-info">
+  <span class="spinner"></span> Scan {{ scan.status }} — refresh in a few seconds.
+</div>
+{% elif scan.status == 'failed' %}
+<div class="alert alert-error">
+  <strong>Scan failed:</strong> {{ scan.error_message or 'no error message recorded' }}
+</div>
+{% endif %}
+
+<div class="stats-grid">
+  <div class="stat">
+    <div class="stat-value">
+      <span class="score-pill score-{{ score_band }}" style="font-size:22px;padding:8px 16px">
+        {{ scan.compliance_score if scan.compliance_score is not none else '—' }}%
+      </span>
+    </div>
+    <div class="stat-label">Compliance score</div>
+  </div>
+  <div class="stat"><div class="stat-value" style="color:#16a34a">{{ scan.pass_count or 0 }}</div><div class="stat-label">Pass</div></div>
+  <div class="stat"><div class="stat-value" style="color:#dc2626">{{ scan.fail_count or 0 }}</div><div class="stat-label">Fail</div></div>
+  <div class="stat"><div class="stat-value" style="color:#64748b">{{ scan.skip_count or 0 }}</div><div class="stat-label">Skip</div></div>
+  <div class="stat"><div class="stat-value" style="color:#7c3aed">{{ scan.manual_count or 0 }}</div><div class="stat-label">Manual</div></div>
+  {% if scan.critical_count %}<div class="stat critical"><div class="stat-value">{{ scan.critical_count }}</div><div class="stat-label">Critical fail</div></div>{% endif %}
+  {% if scan.high_count %}<div class="stat high"><div class="stat-value">{{ scan.high_count }}</div><div class="stat-label">High fail</div></div>{% endif %}
+</div>
+
+{% if sections %}
+<div class="card" style="padding:0;overflow:hidden">
+  {% for section_name, controls in sections %}
+  <div class="compliance-section-title">{{ section_name }} &nbsp;<span class="text-muted" style="font-weight:400">({{ controls|length }} checks)</span></div>
+  {% for r in controls %}
+  <div style="padding:14px 16px;border-bottom:1px solid #f1f5f9">
+    <div class="flex items-center gap-3 mb-2">
+      <span class="badge badge-{{ r.status|lower }}">{{ r.status }}</span>
+      <span class="compliance-control-id">{{ r.control_id }}</span>
+      {% if r.severity and r.status == 'FAIL' %}
+        <span class="badge badge-{{ r.severity|lower }}">{{ r.severity }}</span>
+      {% endif %}
+      {% if not r.scored %}<span class="badge badge-info">unscored</span>{% endif %}
+      <span style="flex:1">{{ r.title }}</span>
+    </div>
+    <div class="text-sm" style="margin-left:6px">
+      {% if r.expected_value %}
+        <div><strong>Expected:</strong> <code>{{ r.expected_value }}</code></div>
+      {% endif %}
+      {% if r.actual_value is not none and r.actual_value != '' %}
+        <div><strong>Observed:</strong> <code>{{ r.actual_value }}</code></div>
+      {% endif %}
+      {% if r.evidence_source %}
+        <div class="compliance-evidence">{{ r.evidence_source }}</div>
+      {% endif %}
+      {% if r.error_message %}
+        <div class="alert alert-error" style="margin-top:6px;font-size:12px">{{ r.error_message }}</div>
+      {% endif %}
+      {% if r.status == 'FAIL' and r.remediation %}
+        <details style="margin-top:8px">
+          <summary class="text-sm" style="cursor:pointer;color:#3b82f6">Remediation</summary>
+          <pre class="finding-fix" style="white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px">{{ r.remediation }}</pre>
+        </details>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% endfor %}
+</div>
+{% elif scan.status == 'done' %}
+<div class="card"><div class="empty"><h3>No controls evaluated</h3></div></div>
+{% endif %}
+{% endblock %}

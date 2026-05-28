@@ -61,7 +61,7 @@ class Scan(Base):
     scan_type      = Column(String(16), nullable=False)   # manifest | cluster
     target_id      = Column(Integer, nullable=False)
     target_name    = Column(String(256), nullable=True)   # filename or cluster name
-    scan_mode      = Column(String(16), nullable=False)   # ai | static
+    scan_mode      = Column(String(16), nullable=False)   # ai | static | cis
     status         = Column(String(16), default="queued") # queued|running|done|failed
     started_at     = Column(DateTime, nullable=True)
     completed_at   = Column(DateTime, nullable=True)
@@ -73,6 +73,13 @@ class Scan(Base):
     triggered_by    = Column(String(64), nullable=True)    # username or "scheduler"
     error_message   = Column(Text, nullable=True)
     patches_status  = Column(String(16), default="none")  # none | generating | done | failed
+    # Compliance scan fields (null for vulnerability scans).
+    framework       = Column(String(64), nullable=True)    # e.g. "cis-kubernetes-1.9"
+    compliance_score = Column(Integer, nullable=True)      # 0-100, cached for fast list rendering
+    pass_count       = Column(Integer, default=0)
+    fail_count       = Column(Integer, default=0)
+    skip_count       = Column(Integer, default=0)
+    manual_count     = Column(Integer, default=0)
 
 
 class Finding(Base):
@@ -91,6 +98,36 @@ class Finding(Base):
     telco_relevance   = Column(Text, nullable=True)
     suggested_patch   = Column(Text, nullable=True)
     patch_explanation = Column(Text, nullable=True)
+
+
+class ComplianceResult(Base):
+    """
+    One row per (scan, CIS control) — the evidence-bearing compliance record.
+
+    Deliberately separate from `findings`: vulnerability findings and compliance
+    results have different status semantics (severity vs PASS/FAIL/SKIP/MANUAL),
+    different evidence shapes, and different downstream access patterns
+    (severity rollup vs per-control time series).
+    """
+    __tablename__ = "compliance_results"
+    id              = Column(Integer, primary_key=True, index=True)
+    scan_id         = Column(Integer, nullable=False, index=True)
+    control_id      = Column(String(32), nullable=False, index=True)
+    title           = Column(String(512), nullable=True)
+    section         = Column(String(64), nullable=True)
+    profile         = Column(String(32), nullable=True)   # control-plane | worker | policies
+    level           = Column(Integer, default=1)
+    scored          = Column(Boolean, default=True)
+    status          = Column(String(16), nullable=False)  # PASS|FAIL|SKIP|MANUAL|ERROR
+    severity        = Column(String(16), nullable=True)
+    expected_value  = Column(String(256), nullable=True)
+    actual_value    = Column(Text, nullable=True)
+    evidence_source = Column(Text, nullable=True)
+    remediation     = Column(Text, nullable=True)
+    references      = Column(Text, nullable=True)         # JSON
+    duration_ms     = Column(Integer, default=0)
+    error_message   = Column(Text, nullable=True)
+    checked_at      = Column(DateTime, default=datetime.utcnow)
 
 
 class Image(Base):
@@ -113,6 +150,12 @@ def _migrate():
         ("findings", "suggested_patch",   "TEXT"),
         ("findings", "patch_explanation", "TEXT"),
         ("scans",    "patches_status",    "TEXT DEFAULT 'none'"),
+        ("scans",    "framework",         "TEXT"),
+        ("scans",    "compliance_score",  "INTEGER"),
+        ("scans",    "pass_count",        "INTEGER DEFAULT 0"),
+        ("scans",    "fail_count",        "INTEGER DEFAULT 0"),
+        ("scans",    "skip_count",        "INTEGER DEFAULT 0"),
+        ("scans",    "manual_count",      "INTEGER DEFAULT 0"),
     ]
     with engine.connect() as conn:
         for table, col, coltype in new_columns:

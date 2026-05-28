@@ -22,6 +22,9 @@ reports/
 # Web server runtime data (DB, uploads, kubeconfigs, session key — never commit)
 data/
 
+# Local scratch directory
+tmp/
+
 # macOS
 .DS_Store
 .AppleDouble

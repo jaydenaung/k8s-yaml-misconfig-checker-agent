@@ -32,6 +32,87 @@ from reporter import render_report, render_pr_comment, save_report
 from suppressor import load_suppressions, apply_suppressions
 
 
+_STATUS_ICON = {"PASS": "✓", "FAIL": "✗", "SKIP": "·", "MANUAL": "?", "ERROR": "!"}
+
+
+def _run_cis(args) -> int:
+    """Execute a CIS benchmark scan. Returns the process exit code."""
+    from cis import APIRunner, Orchestrator, RunnerContext, load_benchmark
+    from cis.result import Status, score as compute_score
+
+    try:
+        benchmark = load_benchmark(args.cis_version)
+    except FileNotFoundError as exc:
+        print(f"[ERROR] {exc}")
+        return 1
+
+    kubeconfig = args.kubeconfig or os.environ.get("KUBECONFIG")
+    if not args.json:
+        print(f"\n  KubeSentinel — CIS Kubernetes Benchmark v{benchmark.version}")
+        print(f"  Checks: {len(benchmark.checks)}  ·  Kubeconfig: {kubeconfig or 'current context'}\n")
+
+    ctx = RunnerContext(kubeconfig_path=kubeconfig)
+    orchestrator = Orchestrator(runners=[APIRunner()])
+    results = orchestrator.run_benchmark(benchmark, ctx)
+
+    if args.json:
+        print(json.dumps([r.to_dict() for r in results], indent=2, default=str))
+        return _cis_exit_code(results)
+
+    # Group + render a compact text report.
+    sections: dict = {}
+    for r in results:
+        sections.setdefault(r.section, []).append(r)
+
+    for section, controls in sorted(sections.items()):
+        print(f"── {section} " + "─" * max(1, 60 - len(section)))
+        for r in controls:
+            status_str = r.status.value if hasattr(r.status, "value") else str(r.status)
+            icon = _STATUS_ICON.get(status_str, "?")
+            sev = f" [{r.severity}]" if r.status == Status.FAIL and r.severity else ""
+            print(f"  {icon} {r.control_id}  {r.title}{sev}")
+            if r.status == Status.FAIL and r.actual_value is not None:
+                print(f"        expected: {r.expected_value}   observed: {r.actual_value}")
+            elif r.status == Status.SKIP and r.evidence_source:
+                print(f"        skipped: {r.evidence_source}")
+            elif r.status == Status.ERROR and r.error:
+                print(f"        error: {r.error}")
+        print()
+
+    score = compute_score(results)
+    counts = {s.value: 0 for s in Status}
+    for r in results:
+        s = r.status.value if hasattr(r.status, "value") else str(r.status)
+        counts[s] = counts.get(s, 0) + 1
+    print("─" * 64)
+    print(f"  Score: {score}%   "
+          f"PASS={counts.get('PASS',0)}  FAIL={counts.get('FAIL',0)}  "
+          f"SKIP={counts.get('SKIP',0)}  MANUAL={counts.get('MANUAL',0)}  "
+          f"ERROR={counts.get('ERROR',0)}")
+    print("─" * 64)
+
+    if args.output:
+        save_report("\n".join([
+            f"# CIS Kubernetes Benchmark v{benchmark.version}",
+            f"Score: {score}%",
+            "",
+            *[f"- [{(r.status.value if hasattr(r.status,'value') else r.status)}] {r.control_id} — {r.title}"
+              for r in results],
+        ]), args.output)
+        print(f"\n  Report saved to: {args.output}")
+
+    return _cis_exit_code(results)
+
+
+def _cis_exit_code(results) -> int:
+    """Exit 2 if any CRITICAL/HIGH FAIL exists, 0 otherwise."""
+    from cis.result import Status
+    for r in results:
+        if r.status == Status.FAIL and r.severity in ("CRITICAL", "HIGH"):
+            return 2
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="KubeSentinel — AI-powered Kubernetes security agent"
@@ -79,10 +160,28 @@ def main():
         help="Generate AI-corrected YAML patches for every finding (premium feature, requires ANTHROPIC_API_KEY)",
         action="store_true",
     )
+    parser.add_argument(
+        "--cis",
+        help="Run a CIS Kubernetes Benchmark scan against the current kubectl context",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--kubeconfig",
+        help="Path to a kubeconfig file (CIS mode only). Defaults to the KUBECONFIG env var.",
+        default=None,
+    )
+    parser.add_argument(
+        "--cis-version",
+        help="CIS benchmark version (default: 1.9)",
+        default="1.9",
+    )
     args = parser.parse_args()
 
+    if args.cis:
+        sys.exit(_run_cis(args))
+
     if not args.manifest and not args.files:
-        parser.error("Provide a manifest path or --files FILE [FILE ...]")
+        parser.error("Provide a manifest path, --files FILE [FILE ...], or --cis")
     if args.manifest and args.files:
         parser.error("Use either a manifest path or --files, not both")
 
