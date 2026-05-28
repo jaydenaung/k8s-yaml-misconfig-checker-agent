@@ -11,7 +11,7 @@
 
 ## What Makes KubeSentinel Different
 
-Traditional Kubernetes security tools follow the same loop:
+Most traditional Kubernetes security tools follow the same loop:
 
 > **Ingest → Detect → Surface → Human decides → Human acts**
 
