@@ -1,6 +1,6 @@
-# KubeSentinel — AI-Powered Kubernetes Security Platform
+# KubeSentinel — AI-Powered Kubernetes Security Agent
 
-> **Detect. Reason. Fix.** — The only Kubernetes security agent that reasons across CVE, misconfiguration, RBAC, and network signals, then generates AI-powered YAML remediation patches on demand.
+> **Detect. Reason. Fix.** — An agentic Kubernetes security platform that reasons across CVE, misconfiguration, RBAC, and network signals to surface proven exploit chains, then enriches findings with AI-generated attack scenarios and YAML remediation patches on demand.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
@@ -17,9 +17,9 @@ Traditional Kubernetes security tools follow the same loop:
 
 KubeSentinel closes that loop:
 
-> **Observe → Reason → Patch → Explain → Human approves**
+> **Observe → Reason → Correlate → Enrich → Patch → Human approves**
 
-The agent doesn't just find that `runAsRoot: true` is misconfigured — it correlates that finding with CVE data, RBAC exposure, and network policy gaps to produce a compound risk score. Then, on demand, it generates corrected YAML patches for every finding with a one-sentence explanation. Static scanners report. KubeSentinel reasons and acts.
+The agent doesn't just find that `runAsRoot: true` is misconfigured — it correlates that finding with CVE data, RBAC exposure, and network policy gaps to produce a compound risk score with a proven exploit chain. Then, on demand, it enriches every finding with an attack scenario and generates corrected YAML patches. Static scanners report. KubeSentinel reasons and acts.
 
 ---
 
@@ -52,6 +52,7 @@ graph TB
         LOOP["Scan Loop  MAX 25 iterations"]
         CLAUDE["Claude claude-sonnet-4-6  tool_use API"]
         TOOLS["Tool Executor  tools.py"]
+        ENRICH["Enrich Loop  post-scan  enrich_finding + finish only"]
         PATCH["Patch Loop  post-scan  suggest_patch + finish only"]
     end
 
@@ -83,6 +84,7 @@ graph TB
     WEB --> Server
     GHA --> CLI
     Server --> BG --> LOOP
+    Server --> BG --> ENRICH
     Server --> BG --> PATCH
     SCHED --> LOOP
     LOOP --> CLAUDE --> TOOLS
@@ -96,11 +98,18 @@ graph TB
     GHA --> GH
 ```
 
-### Two-phase design: Scan → Patch
+### Three-phase design: Scan → Enrich → Patch
 
-**Phase 1 — Scan loop** (`analyze_with_agent` / `analyze_cluster_with_agent`):
-Claude drives the analysis iteratively. It calls tools in the order it decides based on what it finds — not a fixed pipeline. The scan loop never calls `suggest_patch`, so scan cost is predictable and efficient.
+**Phase 1 — Scan**
 
+Two distinct strategies depending on the source:
+
+| Source | Strategy | Why |
+|---|---|---|
+| YAML / Helm manifests | Static analysis | Fast, deterministic, free — rules cover the structural layer |
+| Live clusters | Agentic loop (`analyze_cluster_with_agent`) | Only an agent can explore running state, probe SA permissions, and correlate signals at runtime |
+
+Static manifest scan flow:
 ```
 load_manifest / render_helm_chart
         ↓
@@ -108,8 +117,12 @@ run_check(ALL)                        ← 14 static checks across all resources
         ↓
 lookup_image_cves                     ← Trivy CVE scan per unique image
         ↓
+findings persisted to DB              ← attack_scenario fields empty at this stage
+```
+
+Agentic cluster scan flow (Claude drives iteration order based on findings):
+```
 query_cluster                         ← compact security fingerprints via kubectl
-        │                               (20x smaller than raw kubectl JSON)
         ↓
 probe_service_account                 ← runtime SA permission proof via kubectl auth can-i
         ↓
@@ -120,18 +133,31 @@ report_finding                        ← AI-identified issues + compound risk c
 finish
 ```
 
-**Phase 2 — Patch loop** (post-scan, on demand — `generate_patches_for_findings`):
-A minimal second loop runs only `suggest_patch` + `finish`. It receives the finding list from Phase 1 and generates corrected YAML patches. Triggered by `--patch` on the CLI or the "Generate AI Patches" button in the web UI. Works on both static and AI scans.
+**Phase 2 — Enrich** (post-scan, on demand — `enrich_findings_with_ai`):
+
+A focused second loop runs only `enrich_finding` + `finish`. It receives existing findings and adds a concrete `attack_scenario` to each (how an attacker exploits this specific misconfiguration). Skips findings that already have attack scenarios (sa-probe and compound findings are pre-enriched at scan time).
 
 ```
-findings (from any scan — static or AI)
+findings (from static manifest scan or cluster scan)
+        ↓
+enrich_finding × N                    ← 1-3 sentence exploit chain per finding
+        ↓
+finish                                ← attack scenarios stored in DB
+```
+
+**Phase 3 — Patch** (post-scan, on demand — `generate_patches_for_findings`):
+
+A minimal third loop runs only `suggest_patch` + `finish`. Generates corrected YAML patches for every finding. Works on any scan.
+
+```
+findings (from any scan)
         ↓
 suggest_patch × N                     ← minimal YAML snippet + one-sentence explanation
         ↓
 finish                                ← patches stored in DB / returned to CLI
 ```
 
-**Token efficiency:** `query_cluster` returns compact security fingerprints, not raw kubectl JSON. Typical reductions: secrets (272×), pods (20×), RBAC roles (2× with pre-parsed sensitive access lists). Target: under $0.10 per full cluster scan.
+**Token efficiency:** All API calls use prompt caching (`cache_control: ephemeral`) — repeat input token cost reduced ~90% within a loop. `query_cluster` returns compact security fingerprints, not raw kubectl JSON (20–272× smaller). Target: under $0.10 per full cluster scan. Token usage and estimated cost are tracked per scan and displayed in the web UI.
 
 ---
 
@@ -139,19 +165,22 @@ finish                                ← patches stored in DB / returned to CLI
 
 | Capability | Detail |
 |---|---|
-| **AI patch generation** ✨ | Post-scan premium feature: `suggest_patch` generates corrected YAML for every finding. Works on static and AI scans. CLI: `--patch`. Web: "Generate AI Patches" button. |
-| **Compound risk correlation** | Correlates CVE + misconfiguration + RBAC + network signals per pod into proven exploit chains (CMP-001 → CMP-004) |
-| **Runtime SA probing** | `probe_service_account` uses `kubectl auth can-i --as` to confirm what each SA can actually access — no exec, no intrusion |
-| **14 static checks** | CIS Benchmark, NSA/CISA Hardening Guide, OWASP K8s Top 10 |
-| **Agentic reasoning** | Claude drives the scan iteratively — decides tool order and depth based on findings |
-| **Token-efficient cluster analysis** | `query_cluster` returns compact security fingerprints — 20–272× smaller than raw kubectl JSON |
-| **CVE scanning** | Trivy integration — top CVEs per severity, stored per scan, image CVE dashboard |
-| **Helm support** | `helm template` rendering before analysis |
-| **Web dashboard** | Multi-user, scan history, scheduling, image CVE view |
-| **PR-level scanning** | GitHub Actions — comment on PRs, block merge on CRITICAL |
-| **Suppression allowlist** | Acknowledge accepted risks with audit trail |
-| **Offline / static mode** | Full static analysis with no API key required |
-| **CI/CD friendly** | Exit code `2` on CRITICAL — drop into any pipeline |
+| **Agentic cluster scanning** | Claude drives the live cluster analysis iteratively — decides tool order and depth based on what it finds. Not a fixed pipeline. |
+| **Static manifest scanning** | Instant, deterministic, no API key required. 14 checks covering CIS Benchmark, NSA/CISA Hardening Guide, OWASP K8s Top 10. |
+| **AI enrichment** ✨ | Post-scan: adds concrete attack scenarios to findings. On-demand button in the web UI, works on both manifest and cluster scans. |
+| **AI patch generation** ✨ | Post-scan: generates corrected YAML for every finding. CLI: `--patch`. Web: "✨ Generate AI Patches" button. |
+| **Compound risk correlation** | Correlates CVE + misconfiguration + RBAC + network signals per pod into proven exploit chains (CMP-001 → CMP-004). |
+| **Runtime SA probing** | `probe_service_account` uses `kubectl auth can-i --as` to confirm what each SA can actually access — no exec, no intrusion. |
+| **CIS compliance scanning** | Maps cluster configuration against CIS Kubernetes Benchmark controls. Per-control PASS/FAIL/SKIP results with score and section grouping. |
+| **Token tracking** | Input/output/cache tokens and estimated USD cost tracked per scan. Visible in the web UI per scan. |
+| **Prompt caching** | All Claude API calls use `cache_control: ephemeral` — ~90% reduction in repeat input token costs within a scan loop. |
+| **CVE scanning** | Trivy integration — top CVEs per severity, stored per scan, image CVE dashboard. |
+| **Helm support** | `helm template` rendering before analysis. |
+| **Web dashboard** | Multi-user, scan history, scheduling, image CVE view, compliance dashboard. |
+| **PR-level scanning** | GitHub Actions — comment on PRs, block merge on CRITICAL. |
+| **Suppression allowlist** | Acknowledge accepted risks with audit trail. |
+| **Offline / static mode** | Full static analysis with no API key required. |
+| **CI/CD friendly** | Exit code `2` on CRITICAL — drop into any pipeline. |
 
 ---
 
@@ -160,7 +189,7 @@ finish                                ← patches stored in DB / returned to CLI
 ### Prerequisites
 
 - Python 3.10+
-- An [Anthropic API key](https://console.anthropic.com/) (required for AI mode; static mode works without one)
+- An [Anthropic API key](https://console.anthropic.com/) (required for AI enrichment and patch generation; static scanning works without one)
 - Optional: `kubectl`, `helm`, `trivy`
 
 ### 1 — Clone and set up environment
@@ -192,16 +221,10 @@ export ANTHROPIC_API_KEY=sk-ant-your-key-here
 ### 3 — Run your first scan
 
 ```bash
-# AI agent scan (requires API key)
-python agent.py samples/vulnerable.yaml
-
-# Static checks only — instant, no API key required
+# Static scan — instant, no API key required
 python agent.py samples/vulnerable.yaml --no-ai
 
-# AI scan + generate corrected YAML patches for every finding (premium)
-python agent.py samples/vulnerable.yaml --patch
-
-# Static scan + patches (patch generation works on any scan type)
+# Static scan + AI patch generation for every finding
 python agent.py samples/vulnerable.yaml --no-ai --patch
 
 # Scan an entire directory
@@ -213,8 +236,8 @@ python agent.py ./my-helm-chart/
 # Output to Markdown report
 python agent.py samples/vulnerable.yaml --output reports/result.md
 
-# Raw JSON with patches (pipe to other tools)
-python agent.py samples/vulnerable.yaml --patch --json
+# Raw JSON (pipe to other tools)
+python agent.py samples/vulnerable.yaml --json
 ```
 
 ### 4 — Start the web dashboard
@@ -231,8 +254,6 @@ On first visit, a setup wizard creates your admin account.
 
 ## Step-by-Step Testing Guide
 
-This section walks through validating every layer of KubeSentinel — from unit tests to end-to-end AI scanning.
-
 ### Step 1 — Run the unit test suite
 
 ```bash
@@ -242,54 +263,22 @@ pytest tests/ -v
 
 Expected output: **48 tests pass**, covering all 14 static checks and the suppression allowlist. No API key or cluster connection required.
 
-```
-tests/test_analyzer.py::test_privileged_container PASSED
-tests/test_analyzer.py::test_host_pid PASSED
-...
-tests/test_suppressor.py::test_suppress_by_check_id PASSED
-========================= 48 passed in 0.42s =========================
-```
-
-### Step 2 — Static scan (no API key)
+### Step 2 — Static manifest scan
 
 ```bash
 python agent.py samples/vulnerable.yaml --no-ai
 ```
 
-Expect 10+ findings across CRITICAL and HIGH severities on the intentionally misconfigured sample manifest.
+Expect 10+ findings across CRITICAL and HIGH severities.
 
-### Step 3 — AI agent scan
+### Step 3 — AI patch generation
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
-python agent.py samples/vulnerable.yaml
-```
-
-Watch the agent tool calls in the terminal output:
-
-```
-      📂  load_manifest(path=samples/vulnerable.yaml)
-      🔍  run_check(check=ALL  resource=-1)
-      🛡  lookup_image_cves(nginx:latest)
-      🌐  query_cluster(pods)
-      🔑  probe_service_account(vulnerable-sa  default)
-      ⚠  report_finding([CRITICAL] Privileged container with host namespaces ...)
-      ✅  finish(Found 14 findings ...)
-```
-
-Note: `suggest_patch` does **not** appear here — patch generation is a separate post-scan step.
-
-### Step 4 — Generate AI patches (premium)
-
-```bash
-# Add --patch to generate corrected YAML for every finding
-python agent.py samples/vulnerable.yaml --patch
-
-# Works on static scans too
 python agent.py samples/vulnerable.yaml --no-ai --patch
 ```
 
-The patch step runs after the scan and shows:
+Generates corrected YAML for every finding:
 
 ```
 [patch] Generating AI patches for findings...
@@ -299,44 +288,34 @@ The patch step runs after the scan and shows:
         8 patch(es) generated
 ```
 
-Verify patches in JSON output:
-
-```bash
-python agent.py samples/vulnerable.yaml --patch --json | python -m json.tool | grep -A5 "suggested_patch"
-```
-
-### Step 5 — Web dashboard end-to-end
+### Step 4 — Web dashboard end-to-end
 
 ```bash
 python server.py
 ```
 
-1. Open `http://localhost:8000` → complete the setup wizard (create admin account)
-2. Navigate to **Manifests** → **Upload Manifest** → select `samples/vulnerable.yaml`
-3. Choose **AI Agent** or **Static** scan mode → click **Upload & Scan**
-4. Watch the status badge cycle: `queued → running → done`
-5. Click into the scan → view findings, severity breakdown, compound risk sections
-6. Click **✨ Generate AI Patches** (top right of scan detail) → patches appear inline per finding
-7. Navigate to **Images** → confirm CVE counts appear (requires Trivy)
+1. Open `http://localhost:8000` → complete the setup wizard
+2. Navigate to **Manifests** → upload `samples/vulnerable.yaml` → click **Upload & Scan**
+3. Watch the status badge cycle: `queued → running → done`
+4. Click **🧠 Enrich with AI** (right panel) → attack scenarios appear per finding
+5. Click **✨ Generate AI Patches** → patches appear inline per finding
+6. View token usage and estimated cost in the **AI Enrichment** card
 
-### Step 6 — Static-only web scan (no API key)
+### Step 5 — Live cluster scan + enrichment
 
-Repeat Step 5 with **Static** scan mode selected. Findings appear without an API key — useful for air-gapped environments.
+1. Navigate to **Clusters** → onboard a cluster with a kubeconfig
+2. Click **Scan Now** — static checks run instantly
+3. Click **🧠 Enrich with AI** — Claude adds attack scenarios to all static findings
+4. Review compound risk findings (CVE + RBAC + network signals correlated automatically)
+
+### Step 6 — CIS compliance scan
+
+1. Navigate to **Compliance** → select a cluster → click **Run CIS Scan**
+2. View per-control PASS/FAIL/SKIP results grouped by section with an overall score
 
 ### Step 7 — PR-level scanning (GitHub Actions)
 
-Push a branch with changes to any `.yaml` file. The workflow at `.github/workflows/kubesentinel.yml` will:
-
-1. Detect changed YAML files in the PR
-2. Run AI + static analysis on those files only
-3. Post a finding summary as a PR comment
-4. Block merge if CRITICAL findings are detected
-
-To test locally before pushing:
-
-```bash
-python agent.py --files samples/vulnerable.yaml --pr-comment
-```
+Push a branch with changes to any `.yaml` file. The workflow at `.github/workflows/kubesentinel.yml` will scan changed files, post a finding summary as a PR comment, and block merge on CRITICAL findings.
 
 ### Step 8 — Suppression allowlist
 
@@ -345,7 +324,7 @@ cp samples/.k8s-checker-ignore.yaml .
 python agent.py samples/vulnerable.yaml --no-ai
 ```
 
-Suppressed findings still appear in the report footer with their stated reason — providing an audit trail for compliance reviews.
+Suppressed findings still appear in the report footer for audit trail.
 
 ---
 
@@ -353,12 +332,17 @@ Suppressed findings still appear in the report footer with their stated reason �
 
 | Page | What it does |
 |---|---|
-| Dashboard | Security posture overview — critical/high counts, recent scans, clear history (admin) |
-| Manifests | Upload YAML → AI Agent or Static scan → findings with compound risk and SA probe sections |
-| Clusters | Onboard via kubeconfig → scan on demand or on schedule |
-| Images | Container images across all scans — CVE counts + top CVEs grouped by severity |
-| Users | Admin: create accounts, activate/deactivate |
-| Scan detail | Per-scan findings, attack scenarios, patch viewer. **"✨ Generate AI Patches"** button triggers post-scan patch generation for any completed scan. |
+| **Dashboard** | Security posture overview — critical/high counts, recent scans |
+| **Manifests** | Upload YAML/Helm → instant static scan → AI enrichment + patch generation on demand |
+| **Clusters** | Onboard via kubeconfig → static scan on demand or on schedule → AI enrichment on demand |
+| **Compliance** | CIS Kubernetes Benchmark scans — per-control results, section grouping, overall score |
+| **Images** | Container images across all scans — CVE counts + top CVEs by severity |
+| **Users** | Admin: create accounts, activate/deactivate |
+
+**AI Enrichment card** (manifest detail + cluster detail right panel):
+- **🧠 Enrich with AI** — triggers post-scan enrichment for the latest scan
+- Shows spinner while running, "AI enriched" badge when complete
+- Displays token breakdown: input, output, cache hits, estimated cost in USD
 
 **Scan scheduling:** Set a recurring interval per cluster (6h / 12h / 24h / 48h / weekly). Runs via APScheduler — no cron, no external infrastructure.
 
@@ -376,26 +360,7 @@ curl -o .github/workflows/kubesentinel.yml \
   https://raw.githubusercontent.com/jaydenaung/kubesentinel/main/.github/workflows/kubesentinel.yml
 ```
 
-Add `ANTHROPIC_API_KEY` as a GitHub Actions secret. On every PR touching `.yaml`/`.yml`, KubeSentinel will scan changed files, post findings as a PR comment, and fail the check on CRITICAL findings.
-
-**PR comment format:**
-
-```
-🛡 KubeSentinel · ⛔ BLOCKED
-
-⛔ 1 CRITICAL finding must be resolved before merging.
-
-Scanned: deployment.yaml, rbac.yaml
-Findings: 5 (3 static, 2 AI-identified)
-
-| Severity  | Count |
-|-----------|-------|
-| 🔴 CRITICAL | 1   |
-| 🟠 HIGH     | 2   |
-| 🟡 MEDIUM   | 2   |
-```
-
-Without an API key, falls back to static checks only.
+Add `ANTHROPIC_API_KEY` as a GitHub Actions secret. On every PR touching `.yaml`/`.yml`, KubeSentinel scans changed files, posts findings as a PR comment, and fails the check on CRITICAL findings.
 
 ---
 
@@ -437,7 +402,7 @@ Exit codes: `0` = clean, `1` = error, `2` = CRITICAL findings detected.
 
 ## Suppressing Accepted Risks
 
-Create `.k8s-checker-ignore.yaml` to silence findings your team has reviewed. Suppressed findings appear in the report footer for auditability.
+Create `.k8s-checker-ignore.yaml` to silence findings your team has reviewed:
 
 ```yaml
 suppress:
@@ -449,23 +414,26 @@ suppress:
     reason: "Internal registry enforces immutable tags at push time"
 ```
 
+Suppressed findings appear in the report footer for auditability.
+
 ---
 
 ## Roadmap
 
-KubeSentinel is on a deliberate path from detection to autonomous remediation.
-
 | Phase | Feature | Status |
 |---|---|---|
-| ✅ 1 | **AI patch generation** — post-scan premium feature; `--patch` CLI flag + "✨ Generate AI Patches" web button; works on static and AI scans | **Shipped** |
-| ✅ 1b | **Runtime SA probing** — `probe_service_account` confirms exploitability via `kubectl auth can-i --as`; compound risk correlation (CVE + misconfiguration + RBAC + network) | **Shipped** |
+| ✅ 1 | **Static manifest scanning** — 14 checks, CIS/NSA/OWASP coverage, CLI + web | **Shipped** |
+| ✅ 1b | **Agentic cluster scanning** — Claude-driven loop, SA probing, compound risk correlation | **Shipped** |
 | ✅ 1c | **Token-efficient fingerprinting** — `query_cluster` emits compact security fingerprints (20–272× smaller than raw kubectl JSON) | **Shipped** |
-| 🔄 2 | **Patch review UI** — diff viewer with approve / reject workflow in the web dashboard | In progress |
-| 📋 3 | **GitHub PR creation** — agent opens fix PRs against source repos after human approval | Planned |
-| 📋 4 | **Compliance report generator** — map findings to CIS, NIST, SOC2 controls | Planned |
-| 📋 5 | **Findings relationship graph** — model attack paths across CVE → image → deployment → RBAC | Planned |
+| ✅ 1d | **AI patch generation** — post-scan, on demand; CLI `--patch` + web button | **Shipped** |
+| ✅ 1e | **CIS compliance scanning** — per-control PASS/FAIL/SKIP with score and section grouping | **Shipped** |
+| ✅ 1f | **AI enrichment** — post-scan attack scenario generation for manifest and cluster findings | **Shipped** |
+| ✅ 1g | **Token tracking + prompt caching** — per-scan token usage, USD cost estimate, ~90% cache savings | **Shipped** |
+| 📋 2 | **Scan diff / posture trending** — new/resolved/unchanged findings between scans, posture score over time | Planned |
+| 📋 3 | **Verification loop** — agent applies patch to manifest copy, re-scans, confirms finding resolved | Planned |
+| 📋 4 | **Natural language security query** — ask questions across scan history in plain English | Planned |
+| 📋 5 | **Multi-agent architecture** — triage, remediation, compliance, and orchestrator agents | Planned |
 | 📋 6 | **Runtime signals** — Falco / Kubernetes audit log integration | Planned |
-| 📋 7 | **Multi-agent architecture** — triage, remediation, compliance, and orchestrator agents | Planned |
 
 ---
 
@@ -475,7 +443,7 @@ KubeSentinel is on a deliberate path from detection to autonomous remediation.
 kubesentinel/
 ├── agent.py              # CLI entry point — arg parsing, orchestration
 ├── analyzer.py           # YAML parser, 14 static checks, CHECK_REGISTRY
-├── claude_agent.py       # Agentic loop using Anthropic tool_use API
+├── claude_agent.py       # Agentic loops: scan, enrich, patch (Anthropic tool_use API)
 ├── tools.py              # Tool schemas + execution + security fingerprinting layer
 ├── reporter.py           # Markdown and PR comment renderer
 ├── suppressor.py         # Suppression allowlist loader and filter
@@ -483,19 +451,24 @@ kubesentinel/
 ├── requirements.txt
 ├── .env.example
 ├── CONTRIBUTING.md
+├── cis/                  # CIS Benchmark control definitions
 ├── .github/
 │   └── workflows/
 │       └── kubesentinel.yml  # PR-level manifest scanning
 ├── web/
-│   ├── database.py       # SQLAlchemy models — User, Manifest, Cluster, Scan, Finding, Image
+│   ├── database.py       # SQLAlchemy models — User, Manifest, Cluster, Scan, Finding, Image, ComplianceResult
 │   ├── auth.py           # Session auth, bcrypt password hashing
-│   ├── scanner.py        # Background scan execution (manifest + cluster)
+│   ├── scanner.py        # Background scan execution + AI enrichment + patch generation
+│   ├── cis_scanner.py    # CIS compliance scan execution
 │   ├── scheduler.py      # APScheduler — scheduled cluster scans
-│   ├── routes/           # FastAPI routers (dashboard, manifests, clusters, images, users, api)
-│   └── templates/        # Jinja2 templates — dark-theme dashboard UI
+│   ├── routes/           # FastAPI routers (dashboard, manifests, clusters, compliance, images, users, api)
+│   └── templates/        # Jinja2 templates — dashboard UI
 ├── tests/
-│   ├── test_analyzer.py  # 40 unit tests — all 14 static checks
-│   └── test_suppressor.py # 8 unit tests — suppression logic
+│   ├── test_analyzer.py       # 40 unit tests — all 14 static checks
+│   ├── test_suppressor.py     # 8 unit tests — suppression logic
+│   ├── test_cis_parsers.py    # CIS parser tests
+│   ├── test_cis_runner.py     # CIS runner tests
+│   └── test_cis_schema.py     # CIS schema tests
 ├── samples/
 │   ├── vulnerable.yaml              # Intentionally misconfigured manifest
 │   ├── secure.yaml                  # Hardened reference manifest
@@ -548,21 +521,20 @@ python -m pip install -r requirements.txt
 which python   # should point inside venv/bin/
 ```
 
-**`ANTHROPIC_API_KEY not set`**:
+**`ANTHROPIC_API_KEY not set`** — AI enrichment and patch generation require the key; static scanning does not:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
-# or add to .env file in project root
 ```
 
 **Port already in use**:
 
 ```bash
 lsof -ti:8000 | xargs kill -9
-python server.py
+python server.py --port 8001
 ```
 
-**Trivy / helm / kubectl not found** — these are optional; install only what you need. KubeSentinel logs a graceful skip and continues.
+**Trivy / helm / kubectl not found** — optional; KubeSentinel logs a graceful skip and continues.
 
 ---
 
@@ -570,9 +542,9 @@ python server.py
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add static checks, agent tools, and tests.
 
-**Add a static check:** implement a function in `analyzer.py` taking `(resource, context)`, returning a finding dict or `None`, register in `CHECK_REGISTRY`, add tests.
+**Add a static check:** implement in `analyzer.py`, register in `CHECK_REGISTRY`, add tests.
 
-**Add an agent tool:** define its JSON schema in `TOOLS` in `tools.py`, add an execution function, wire into `execute_tool`. To restrict a tool to the patch loop only (post-scan), omit it from the main scan by checking `build_tools(patch_enabled=False)`.
+**Add an agent tool:** define JSON schema in `tools.py`, add execution function, wire into `execute_tool`. Use `build_tools(patch_enabled=False)` to restrict a tool to the patch loop only.
 
 ---
 
@@ -580,11 +552,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add static checks, agent tools
 
 KubeSentinel is provided for **informational and educational purposes only**.
 
-- **Read-only** — KubeSentinel never modifies your cluster, manifests, or any external system. It only reads and reports.
+- **Read-only** — KubeSentinel never modifies your cluster, manifests, or any external system.
 - **No security guarantee** — A clean report does not mean your cluster is secure. Always combine with manual review, penetration testing, and defence-in-depth.
-- **AI findings require human review** — Findings and patches marked `[AI]` are generated by a large language model. They may contain false positives or errors. Never apply an AI-generated patch without independent verification.
-- **No warranty** — Provided "as is", without warranty of any kind. The author accepts no liability for damages of any kind.
-- **Untrusted input** — Do not run KubeSentinel against YAML from untrusted sources without reviewing it first. Malicious YAML could contain prompt injection attempts.
+- **AI findings require human review** — Findings and patches marked `[AI]` are generated by a large language model and may contain false positives or errors. Never apply an AI-generated patch without independent verification.
+- **No warranty** — Provided "as is", without warranty of any kind.
+- **Untrusted input** — Do not run KubeSentinel against YAML from untrusted sources without reviewing it first.
 
 > **TL;DR:** This is a reasoning and reporting tool, not a compliance auditor. It surfaces issues and suggests fixes for your engineers to review — it does not replace human judgment or formal security assessments.
 
