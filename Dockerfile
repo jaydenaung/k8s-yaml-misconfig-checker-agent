@@ -12,9 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
         -o /usr/local/bin/kubectl && \
     chmod +x /usr/local/bin/kubectl && \
-    # trivy — official install script, auto-detects arch
-    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-        | sh -s -- -b /usr/local/bin && \
+    # trivy — download script first so curl failure aborts the build (pipe swallows exit codes)
+    curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+        -o /tmp/trivy-install.sh && \
+    sh /tmp/trivy-install.sh -b /usr/local/bin && \
+    rm /tmp/trivy-install.sh && \
+    trivy --version && \
     # helm — official install script, auto-detects arch
     curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash && \
     apt-get purge -y curl && \
