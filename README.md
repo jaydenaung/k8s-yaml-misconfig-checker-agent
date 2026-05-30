@@ -692,6 +692,25 @@ KubeSentinel is provided for **informational and educational purposes only**.
 
 ---
 
+## Credits
+
+KubeSentinel is built on the shoulders of excellent open-source tools:
+
+| Tool | Author | Use |
+|---|---|---|
+| [Trivy](https://github.com/aquasecurity/trivy) | Aqua Security | CVE scanning for container images and filesystem |
+| [kubectl](https://github.com/kubernetes/kubectl) | The Kubernetes Authors | Live cluster interrogation and SA permission probing |
+| [Helm](https://github.com/helm/helm) | The Helm Authors | Chart rendering before manifest analysis |
+| [Claude API](https://www.anthropic.com/) | Anthropic | Agentic scanning, AI enrichment, patch generation |
+| [FastAPI](https://github.com/tiangolo/fastapi) | Sebastián Ramírez | Web dashboard framework |
+| [SQLAlchemy](https://github.com/sqlalchemy/sqlalchemy) | SQLAlchemy authors | Scan history and findings persistence |
+
+Security checks are informed by the [CIS Kubernetes Benchmark](https://www.cisecurity.org/benchmark/kubernetes), [NSA/CISA Kubernetes Hardening Guidance](https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF), and [OWASP Kubernetes Top 10](https://owasp.org/www-project-kubernetes-top-ten/).
+
+Full third-party attribution: [NOTICE](NOTICE)
+
+---
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE).

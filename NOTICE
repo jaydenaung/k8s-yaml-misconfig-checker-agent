@@ -1,0 +1,111 @@
+KubeSentinel — AI-Powered Kubernetes Security Platform
+Copyright 2026 Jayden Aung
+
+Licensed under the Apache License, Version 2.0.
+See LICENSE for the full license text.
+
+-------------------------------------------------------------------------------
+THIRD-PARTY SOFTWARE AND TOOLS
+-------------------------------------------------------------------------------
+
+This product bundles or integrates the following third-party software.
+Each component is governed by its own license as noted below.
+
+-------------------------------------------------------------------------------
+Trivy
+  Copyright (c) 2019 Aqua Security Software Ltd.
+  License: Apache License 2.0
+  Source:  https://github.com/aquasecurity/trivy
+  Use:     Container image and filesystem vulnerability scanning (CVE detection).
+
+kubectl
+  Copyright (c) The Kubernetes Authors
+  License: Apache License 2.0
+  Source:  https://github.com/kubernetes/kubectl
+  Use:     Live cluster interrogation and ServiceAccount permission probing.
+
+Helm
+  Copyright (c) The Helm Authors
+  License: Apache License 2.0
+  Source:  https://github.com/helm/helm
+  Use:     Helm chart rendering (helm template) before manifest analysis.
+
+-------------------------------------------------------------------------------
+PYTHON DEPENDENCIES
+-------------------------------------------------------------------------------
+
+anthropic (Anthropic SDK)
+  Copyright (c) Anthropic, PBC
+  License: MIT
+  Source:  https://github.com/anthropic/anthropic-sdk-python
+  Use:     Claude API integration for agentic scanning, AI enrichment, and patch generation.
+
+FastAPI
+  Copyright (c) Sebastián Ramírez
+  License: MIT
+  Source:  https://github.com/tiangolo/fastapi
+  Use:     Web framework for the KubeSentinel dashboard.
+
+SQLAlchemy
+  Copyright (c) SQLAlchemy authors
+  License: MIT
+  Source:  https://github.com/sqlalchemy/sqlalchemy
+  Use:     ORM for scan history, findings, and compliance results persistence.
+
+Uvicorn
+  Copyright (c) Encode OSS Ltd.
+  License: BSD 3-Clause
+  Source:  https://github.com/encode/uvicorn
+  Use:     ASGI server for the FastAPI web application.
+
+Jinja2
+  Copyright (c) Armin Ronacher and contributors
+  License: BSD 3-Clause
+  Source:  https://github.com/pallets/jinja
+  Use:     HTML templating for the web dashboard.
+
+APScheduler
+  Copyright (c) Alex Grönholm
+  License: MIT
+  Source:  https://github.com/agronholm/apscheduler
+  Use:     Scheduled recurring cluster scans.
+
+PyYAML
+  Copyright (c) Kirill Simonov
+  License: MIT
+  Source:  https://github.com/yaml/pyyaml
+  Use:     YAML manifest parsing.
+
+bcrypt
+  Copyright (c) The Python bcrypt contributors
+  License: Apache License 2.0
+  Source:  https://github.com/pyca/bcrypt
+  Use:     Password hashing for user authentication.
+
+python-dotenv
+  Copyright (c) Saurabh Kumar
+  License: BSD 3-Clause
+  Source:  https://github.com/theskumar/python-dotenv
+  Use:     Loading environment variables from .env files.
+
+itsdangerous
+  Copyright (c) Armin Ronacher and contributors
+  License: BSD 3-Clause
+  Source:  https://github.com/pallets/itsdangerous
+  Use:     Secure session cookie signing.
+
+-------------------------------------------------------------------------------
+ACKNOWLEDGEMENTS
+-------------------------------------------------------------------------------
+
+KubeSentinel's security checks are informed by the following frameworks
+and publications:
+
+  - CIS Kubernetes Benchmark (Center for Internet Security)
+    https://www.cisecurity.org/benchmark/kubernetes
+
+  - NSA/CISA Kubernetes Hardening Guidance
+    https://media.defense.gov/2022/Aug/29/2003066362/-1/-1/0/CTR_KUBERNETES_HARDENING_GUIDANCE_1.2_20220829.PDF
+
+  - OWASP Kubernetes Top 10
+    https://owasp.org/www-project-kubernetes-top-ten/
