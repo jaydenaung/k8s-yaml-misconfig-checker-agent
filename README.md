@@ -55,9 +55,11 @@ The agent doesn't just find that `runAsRoot: true` is misconfigured — it corre
 
 ## Web Dashboard
 
-![KubeSentinel Dashboard](img/kubesentinel1.png)
+![KubeSentinel Dashboard](img/dashboard-overview.png)
 
 An on-prem security dashboard — runs on your internal network, accessible by IP. No SaaS dependency, no data leaves your environment.
+
+The dashboard gives an instant security posture overview: critical and high finding counts, total scans, manifests, and clusters — with a full recent scan history showing severity breakdowns per scan.
 
 ---
 
@@ -195,11 +197,15 @@ finish                                ← patches stored in DB / returned to CLI
 
 | Capability | Detail |
 |---|---|
-| **Agentic cluster scanning** | Claude drives the live cluster analysis iteratively — decides tool order and depth based on what it finds. Not a fixed pipeline. |
+| **Agentic cluster scanning** | Claude drives the live cluster analysis iteratively — decides tool order and depth based on what it finds. Not a fixed pipeline. Each finding shows its correlated signals, attacker chain, and prioritised remediation steps. |
 | **Static manifest scanning** | Instant, deterministic, no API key required. 14 checks covering CIS Benchmark, NSA/CISA Hardening Guide, OWASP K8s Top 10. |
 | **AI enrichment** ✨ | Post-scan: adds concrete attack scenarios to findings. On-demand button in the web UI, works on both manifest and cluster scans. |
 | **AI patch generation** ✨ | Post-scan: generates corrected YAML for every finding. CLI: `--patch`. Web: "✨ Generate AI Patches" button. |
 | **Compound risk correlation** | Correlates CVE + misconfiguration + RBAC + network signals per pod into proven exploit chains (CMP-001 → CMP-004). |
+
+![Cluster Scan with AI Enrichment](img/cluster-scan-ai-enriched.png)
+
+> Cluster scan showing compound risk correlation across CVE, misconfiguration, RBAC escalation, and network exposure signals — with AI-generated attacker chains and prioritised remediation steps.
 | **Runtime SA probing** | `probe_service_account` uses `kubectl auth can-i --as` to confirm what each SA can actually access — no exec, no intrusion. |
 | **CIS compliance scanning** | Maps cluster configuration against CIS Kubernetes Benchmark controls. Per-control PASS/FAIL/SKIP results with score and section grouping. |
 | **Token tracking** | Input/output/cache tokens and estimated USD cost tracked per scan. Visible in the web UI per scan. |
@@ -406,6 +412,10 @@ python server.py
 
 1. Navigate to **Compliance** → select a cluster → click **Run CIS Scan**
 2. View per-control PASS/FAIL/SKIP results grouped by section with an overall score
+
+![CIS Compliance Scan](img/cis-compliance-scan.png)
+
+> CIS Kubernetes Benchmark v1.9 scan showing 50% compliance score — per-control PASS/FAIL with expected vs actual values, evidence source, and remediation guidance grouped by section (API Server, Controller Manager, etcd, RBAC).
 
 ### Step 7 — PR-level scanning (GitHub Actions)
 
