@@ -6,8 +6,31 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Model](https://img.shields.io/badge/Claude-claude--sonnet--4--6-blueviolet)](https://www.anthropic.com/)
 [![Tests](https://img.shields.io/badge/tests-48%20passing-brightgreen.svg)](tests/)
-[![Docker](https://img.shields.io/badge/docker-jaydenaung17%2Fkubesentinel-blue?logo=docker)](https://hub.docker.com/r/jaydenaung17/kubesentinel)
-[![GHCR](https://img.shields.io/badge/ghcr-ghcr.io%2Fjaydenaung%2Fkubesentinel-blue?logo=github)](https://ghcr.io/jaydenaung/kubesentinel)
+[![Docker Hub](https://img.shields.io/docker/v/jaydenaung17/kubesentinel?label=Docker%20Hub&logo=docker)](https://hub.docker.com/r/jaydenaung17/kubesentinel)
+[![Docker Pulls](https://img.shields.io/docker/pulls/jaydenaung17/kubesentinel?logo=docker)](https://hub.docker.com/r/jaydenaung17/kubesentinel)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fjaydenaung%2Fkubesentinel-blue?logo=github)](https://ghcr.io/jaydenaung/kubesentinel)
+
+---
+
+## Latest Release — v1.0.0
+
+> **KubeSentinel v1.0.0 is now available as a signed container image on Docker Hub and GHCR.**
+> This is the first production release — fully containerized, multi-platform, and ready to deploy on any Kubernetes environment.
+
+| | |
+|---|---|
+| **Docker Hub** | [`jaydenaung17/kubesentinel:v1.0.0`](https://hub.docker.com/r/jaydenaung17/kubesentinel) |
+| **GHCR** | `ghcr.io/jaydenaung/kubesentinel:v1.0.0` |
+| **Platforms** | `linux/amd64` · `linux/arm64` (Apple Silicon native) |
+| **Image signing** | cosign keyless (sigstore) — verifiable supply chain |
+| **Bundled tools** | kubectl · trivy · helm — no separate installation required |
+
+```bash
+docker pull jaydenaung17/kubesentinel:latest
+docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-... -v kubesentinel-data:/app/data jaydenaung17/kubesentinel:latest
+```
+
+**What's included in v1.0.0:** static manifest scanning (14 checks) · agentic cluster scanning · compound risk correlation · AI enrichment with attack scenarios · AI patch generation · CIS compliance scanning · token tracking · prompt caching · web dashboard · GitHub Actions PR scanner
 
 ---
 
@@ -529,6 +552,7 @@ Suppressed findings appear in the report footer for auditability.
 | ✅ 1e | **CIS compliance scanning** — per-control PASS/FAIL/SKIP with score and section grouping | **Shipped** |
 | ✅ 1f | **AI enrichment** — post-scan attack scenario generation for manifest and cluster findings | **Shipped** |
 | ✅ 1g | **Token tracking + prompt caching** — per-scan token usage, USD cost estimate, ~90% cache savings | **Shipped** |
+| 🚀 v1.0.0 | **Container release** — signed multi-platform image on Docker Hub + GHCR, Dockerfile, docker-compose, automated publish pipeline | **Released** |
 | 📋 2 | **Scan diff / posture trending** — new/resolved/unchanged findings between scans, posture score over time | Planned |
 | 📋 3 | **Verification loop** — agent applies patch to manifest copy, re-scans, confirms finding resolved | Planned |
 | 📋 4 | **Natural language security query** — ask questions across scan history in plain English | Planned |
