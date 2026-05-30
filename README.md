@@ -354,6 +354,28 @@ python server.py --host 127.0.0.1  # local-only
 
 On first visit, a setup wizard creates your admin account.
 
+#### Forgot your admin password?
+
+There is no self-service reset UI yet. Update the password directly in the SQLite database:
+
+```bash
+python3 - <<'EOF'
+import bcrypt, sqlite3
+
+new_password = "YourNewPassword123"   # change this
+admin_username = "admin"              # change if different
+
+hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+con = sqlite3.connect("data/kubesentinel.db")
+con.execute("UPDATE users SET hashed_password = ? WHERE username = ?", (hashed, admin_username))
+con.commit()
+con.close()
+print("Password reset.")
+EOF
+```
+
+If running in Docker, prefix with `docker exec -it <container_name> python3 -`.
+
 ---
 
 ## Step-by-Step Testing Guide
