@@ -4,7 +4,7 @@
 **Repository:** kubesentinel
 **Document path:** `docs/adr/INDEX.md`
 **Document type:** Architecture Decision Records (ADR) + product narrative
-**Last updated:** 2026-05-27
+**Last updated:** 2026-05-28
 **Document conventions:** every architectural or product decision is captured as an ADR with **Context**, **Options considered**, **Decision**, **Rationale**, and **Consequences**. Decisions are numbered and append-only — superseded ADRs are marked as such rather than rewritten.
 
 ---

@@ -1,0 +1,14 @@
+services:
+  kubesentinel:
+    build: .
+    image: kubesentinel:dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - kubesentinel-data:/app/data
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    restart: unless-stopped
+
+volumes:
+  kubesentinel-data:
