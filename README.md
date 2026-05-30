@@ -27,7 +27,12 @@
 
 ```bash
 docker pull jaydenaung17/kubesentinel:latest
+
+# With AI features (enrichment, patch generation, agentic scanning)
 docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-... -v kubesentinel-data:/app/data jaydenaung17/kubesentinel:latest
+
+# Without API key — static scanning, CVE scanning, CIS compliance all still work
+docker run -p 8000:8000 -v kubesentinel-data:/app/data jaydenaung17/kubesentinel:latest
 ```
 
 **What's included in v1.0.0:** static manifest scanning (14 checks) · agentic cluster scanning · compound risk correlation · AI enrichment with attack scenarios · AI patch generation · CIS compliance scanning · token tracking · prompt caching · web dashboard · GitHub Actions PR scanner
@@ -213,9 +218,17 @@ finish                                ← patches stored in DB / returned to CLI
 
 The fastest way to run KubeSentinel — no Python setup, no dependency installs. The image includes kubectl, trivy, and helm.
 
+**No Anthropic API key? No problem.** Static manifest scanning, CVE scanning, and CIS compliance all work without one. AI enrichment and patch generation require the key.
+
 ```bash
+# With AI features
 docker run -p 8000:8000 \
   -e ANTHROPIC_API_KEY=sk-ant-... \
+  -v kubesentinel-data:/app/data \
+  jaydenaung17/kubesentinel:latest
+
+# Without API key — static scanning still fully functional
+docker run -p 8000:8000 \
   -v kubesentinel-data:/app/data \
   jaydenaung17/kubesentinel:latest
 ```
