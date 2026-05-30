@@ -6,6 +6,8 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Model](https://img.shields.io/badge/Claude-claude--sonnet--4--6-blueviolet)](https://www.anthropic.com/)
 [![Tests](https://img.shields.io/badge/tests-48%20passing-brightgreen.svg)](tests/)
+[![Docker](https://img.shields.io/badge/docker-jaydenaung17%2Fkubesentinel-blue?logo=docker)](https://hub.docker.com/r/jaydenaung17/kubesentinel)
+[![GHCR](https://img.shields.io/badge/ghcr-ghcr.io%2Fjaydenaung%2Fkubesentinel-blue?logo=github)](https://ghcr.io/jaydenaung/kubesentinel)
 
 ---
 
@@ -184,7 +186,63 @@ finish                                ← patches stored in DB / returned to CLI
 
 ---
 
-## Quick Start
+## Run with Docker
+
+The fastest way to run KubeSentinel — no Python setup, no dependency installs. The image includes kubectl, trivy, and helm.
+
+```bash
+docker run -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -v kubesentinel-data:/app/data \
+  jaydenaung17/kubesentinel:latest
+```
+
+Open `http://localhost:8000`. On first visit, a setup wizard creates your admin account.
+
+**Run on a different port:**
+```bash
+docker run -p 8001:8000 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -v kubesentinel-data:/app/data \
+  jaydenaung17/kubesentinel:latest
+```
+
+**Using docker-compose (recommended for local dev):**
+```bash
+# Clone the repo, then:
+ANTHROPIC_API_KEY=sk-ant-... docker-compose up
+```
+
+### Scanning a live cluster from Docker
+
+When running inside a container, the kubeconfig must use a hostname reachable from inside Docker — not `127.0.0.1`. For Docker Desktop:
+
+```bash
+# Create a container-compatible kubeconfig
+kubectl config view --raw --minify --context=docker-desktop | \
+  sed 's|https://127.0.0.1:6443|https://kubernetes.docker.internal:6443|g' \
+  > ~/Desktop/kubeconfig-docker.yaml
+```
+
+Upload `kubeconfig-docker.yaml` in the Clusters UI. `kubernetes.docker.internal` is in Docker Desktop's API server TLS certificate SANs, so TLS verification works without skipping.
+
+### Available image tags
+
+| Tag | Description |
+|---|---|
+| `latest` | Latest stable release |
+| `v1.0.0` | Pinned semantic version |
+| `sha-<git-sha>` | Exact commit build |
+
+Images are published to both registries on every tagged release:
+- Docker Hub: `jaydenaung17/kubesentinel`
+- GHCR: `ghcr.io/jaydenaung/kubesentinel`
+
+All images are signed with cosign keyless signing (sigstore) for supply chain verification.
+
+---
+
+## Quick Start (Python / source)
 
 ### Prerequisites
 
@@ -350,6 +408,48 @@ Suppressed findings still appear in the report footer for audit trail.
 
 ---
 
+## Publishing the Container Image
+
+### Manual push (first time or one-off release)
+
+```bash
+# Step 1 — Build for both platforms
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --tag jaydenaung17/kubesentinel:v1.0.0 \
+  --tag jaydenaung17/kubesentinel:latest \
+  --tag ghcr.io/jaydenaung/kubesentinel:v1.0.0 \
+  --tag ghcr.io/jaydenaung/kubesentinel:latest \
+  --push \
+  .
+
+# Step 2 — Log in to Docker Hub (if not already)
+docker login -u jaydenaung17
+
+# Step 3 — Log in to GHCR (use a GitHub personal access token with write:packages scope)
+echo YOUR_GITHUB_TOKEN | docker login ghcr.io -u jaydenaung --password-stdin
+```
+
+### Automated push via GitHub Actions (recommended)
+
+Every time you push a version tag, the publish workflow builds and pushes to both registries automatically:
+
+```bash
+git tag v1.0.0
+git push --tags
+```
+
+Required GitHub secrets (Settings → Secrets → Actions):
+
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | `jaydenaung17` |
+| `DOCKERHUB_TOKEN` | Docker Hub access token (hub.docker.com → Account Settings → Security) |
+
+`GITHUB_TOKEN` for GHCR is automatic — no setup needed.
+
+---
+
 ## PR-Level Manifest Scanning (GitHub Actions)
 
 Copy the workflow into your repo:
@@ -452,9 +552,15 @@ kubesentinel/
 ├── .env.example
 ├── CONTRIBUTING.md
 ├── cis/                  # CIS Benchmark control definitions
+├── Dockerfile                # Container image — includes kubectl, trivy, helm
+├── docker-compose.yml        # Local dev compose
+├── .dockerignore
 ├── .github/
 │   └── workflows/
-│       └── kubesentinel.yml  # PR-level manifest scanning
+│       ├── kubesentinel.yml  # PR-level manifest scanning
+│       ├── security.yml      # Source code security scanning (CodeQL, Bandit, pip-audit, Trivy)
+│       └── publish.yml       # Build + push to Docker Hub + GHCR on tag push
+│   └── dependabot.yml        # Weekly dependency update PRs
 ├── web/
 │   ├── database.py       # SQLAlchemy models — User, Manifest, Cluster, Scan, Finding, Image, ComplianceResult
 │   ├── auth.py           # Session auth, bcrypt password hashing
