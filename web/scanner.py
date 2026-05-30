@@ -199,6 +199,7 @@ def _run_cluster_scan(db, scan: Scan) -> None:
         resources, findings = _cluster_static_checks(kubeconfig_path)
 
     _persist_findings(db, scan, findings)
+    _extract_images(db, scan, resources)
     cluster.last_scanned_at = datetime.utcnow()
     scan.status = "done"
     scan.completed_at = datetime.utcnow()

@@ -189,6 +189,10 @@ suggest_patch × N                     ← minimal YAML snippet + one-sentence e
 finish                                ← patches stored in DB / returned to CLI
 ```
 
+![AI-Generated Patch](img/ai-generated-patch.png)
+
+> Compound risk finding with AI-generated YAML patch — the agent correlates misconfiguration, RBAC escalation, and network exposure signals into a single exploit chain, then produces a minimal `securityContext` patch that collapses all three remediations in one change.
+
 **Token efficiency:** All API calls use prompt caching (`cache_control: ephemeral`) — repeat input token cost reduced ~90% within a loop. `query_cluster` returns compact security fingerprints, not raw kubectl JSON (20–272× smaller). Target: under $0.10 per full cluster scan. Token usage and estimated cost are tracked per scan and displayed in the web UI.
 
 ---
