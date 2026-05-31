@@ -82,6 +82,16 @@ def run_static_checks(resources: List[Dict]) -> List[Dict]:
             check_liveness_readiness,
             check_security_context,
             check_rbac_wildcard,
+            check_apparmor,
+            check_default_namespace,
+            check_allow_privilege_escalation,
+            check_ssh_port,
+            check_ingress_tls,
+            check_service_loadbalancer,
+            check_image_digest,
+            check_env_var_secrets,
+            check_topology_spread,
+            check_drop_all_capabilities,
         ]
 
         for fn in fns:
@@ -403,6 +413,193 @@ def check_rbac_wildcard(resource, context):
     return findings
 
 
+def check_apparmor(resource, context):
+    """K8S-015 — Missing AppArmor annotation."""
+    if resource.get("kind") not in ("Pod", "Deployment", "DaemonSet", "StatefulSet"):
+        return None
+    annotations = resource.get("metadata", {}).get("annotations", {})
+    has_apparmor = any("apparmor" in k.lower() for k in annotations)
+    if not has_apparmor:
+        return _finding(
+            "K8S-015", "LOW", context,
+            "No AppArmor profile annotation",
+            "No AppArmor profile is set. AppArmor restricts the syscalls a container can make, "
+            "reducing the impact of a container compromise.",
+            "Add annotation: container.apparmor.security.beta.kubernetes.io/<container>: runtime/default",
+            "metadata.annotations"
+        )
+    return None
+
+
+def check_default_namespace(resource, context):
+    """K8S-016 — Workload deployed in the default namespace."""
+    if resource.get("kind") not in ("Deployment", "DaemonSet", "StatefulSet", "Pod", "Job", "CronJob"):
+        return None
+    ns = resource.get("metadata", {}).get("namespace", "default")
+    if ns == "default":
+        return _finding(
+            "K8S-016", "LOW", context,
+            "Workload deployed in default namespace",
+            "Deploying workloads in the 'default' namespace makes it harder to apply "
+            "namespace-scoped NetworkPolicies and RBAC boundaries.",
+            "Create a dedicated namespace for the application and deploy there.",
+            "metadata.namespace"
+        )
+    return None
+
+
+def check_allow_privilege_escalation(resource, context):
+    """K8S-017 — allowPrivilegeEscalation not explicitly false."""
+    findings = []
+    for c in _get_containers(resource):
+        sc = c.get("securityContext", {})
+        if sc.get("allowPrivilegeEscalation") is not False:
+            findings.append(_finding(
+                "K8S-017", "MEDIUM", context,
+                f"allowPrivilegeEscalation not disabled: {c.get('name')}",
+                "allowPrivilegeEscalation is not set to false. This allows child processes to "
+                "gain more privileges than the parent — a common privilege escalation vector.",
+                "Set securityContext.allowPrivilegeEscalation: false on every container.",
+                f"spec.containers[{c.get('name')}].securityContext.allowPrivilegeEscalation"
+            ))
+    return findings
+
+
+def check_ssh_port(resource, context):
+    """K8S-018 — Container exposes port 22 (SSH)."""
+    findings = []
+    for c in _get_containers(resource):
+        for port in c.get("ports", []):
+            if port.get("containerPort") == 22:
+                findings.append(_finding(
+                    "K8S-018", "HIGH", context,
+                    f"SSH port 22 exposed: {c.get('name')}",
+                    "Container exposes port 22. SSH in containers is an anti-pattern — it bypasses "
+                    "Kubernetes audit logging and creates a persistent backdoor if the image is compromised.",
+                    "Remove SSH from the container image. Use 'kubectl exec' for debugging instead.",
+                    f"spec.containers[{c.get('name')}].ports"
+                ))
+    return findings
+
+
+def check_ingress_tls(resource, context):
+    """K8S-019 — Ingress missing TLS configuration."""
+    if resource.get("kind") != "Ingress":
+        return None
+    spec = resource.get("spec", {})
+    if not spec.get("tls"):
+        return _finding(
+            "K8S-019", "MEDIUM", context,
+            "Ingress has no TLS configuration",
+            "This Ingress does not enforce TLS. Traffic between clients and the ingress "
+            "controller will be transmitted in plaintext.",
+            "Add a spec.tls block with a valid certificate Secret to enforce HTTPS.",
+            "spec.tls"
+        )
+    return None
+
+
+def check_service_loadbalancer(resource, context):
+    """K8S-020 — Service of type LoadBalancer without restriction annotation."""
+    if resource.get("kind") != "Service":
+        return None
+    if resource.get("spec", {}).get("type") != "LoadBalancer":
+        return None
+    annotations = resource.get("metadata", {}).get("annotations", {})
+    has_restriction = any(
+        k in annotations for k in [
+            "service.beta.kubernetes.io/aws-load-balancer-internal",
+            "networking.gke.io/load-balancer-type",
+            "service.kubernetes.io/azure-load-balancer-internal",
+        ]
+    )
+    if not has_restriction:
+        return _finding(
+            "K8S-020", "HIGH", context,
+            "LoadBalancer Service may be publicly exposed",
+            "Service type is LoadBalancer with no internal-only annotation. "
+            "This likely provisions a public cloud load balancer, exposing the service to the internet.",
+            "Add an annotation to make the load balancer internal, or change the service type to ClusterIP "
+            "and use an Ingress controller for external access.",
+            "spec.type"
+        )
+    return None
+
+
+def check_image_digest(resource, context):
+    """K8S-021 — Image not pinned to a SHA digest."""
+    findings = []
+    for c in _get_containers(resource):
+        image = c.get("image", "")
+        if "@sha256:" not in image:
+            findings.append(_finding(
+                "K8S-021", "LOW", context,
+                f"Image not pinned to SHA digest: {c.get('name')}",
+                f"Image '{image}' is not pinned to a SHA256 digest. Even immutable tags can be "
+                "overwritten in some registries, creating a supply chain risk.",
+                "Pin images to their digest: image@sha256:<hash>. Use tools like Renovate to automate digest updates.",
+                f"spec.containers[{c.get('name')}].image"
+            ))
+    return findings
+
+
+def check_env_var_secrets(resource, context):
+    """K8S-022 — Secret referenced via envFrom instead of mounted volume."""
+    findings = []
+    for c in _get_containers(resource):
+        for env_from in c.get("envFrom", []):
+            if "secretRef" in env_from:
+                findings.append(_finding(
+                    "K8S-022", "LOW", context,
+                    f"Secret exposed as environment variable via envFrom: {c.get('name')}",
+                    "Secrets loaded via envFrom are exposed as environment variables, "
+                    "which can leak via crash dumps, /proc, or logging of env vars.",
+                    "Mount secrets as files via volumeMounts instead of envFrom where possible.",
+                    f"spec.containers[{c.get('name')}].envFrom"
+                ))
+    return findings
+
+
+def check_topology_spread(resource, context):
+    """K8S-023 — Deployment missing topologySpreadConstraints (single point of failure risk)."""
+    if resource.get("kind") != "Deployment":
+        return None
+    spec = resource.get("spec", {})
+    replicas = spec.get("replicas", 1)
+    if replicas < 2:
+        return None
+    template_spec = spec.get("template", {}).get("spec", {})
+    if not template_spec.get("topologySpreadConstraints") and not template_spec.get("affinity"):
+        return _finding(
+            "K8S-023", "LOW", context,
+            "Multi-replica Deployment missing spread constraints",
+            f"Deployment has {replicas} replicas but no topologySpreadConstraints or affinity rules. "
+            "All replicas may be scheduled on the same node, creating a single point of failure.",
+            "Add topologySpreadConstraints to distribute replicas across nodes or availability zones.",
+            "spec.template.spec.topologySpreadConstraints"
+        )
+    return None
+
+
+def check_drop_all_capabilities(resource, context):
+    """K8S-024 — Container does not drop ALL capabilities."""
+    findings = []
+    for c in _get_containers(resource):
+        sc = c.get("securityContext", {})
+        caps = sc.get("capabilities", {})
+        dropped = caps.get("drop", [])
+        if "ALL" not in [d.upper() for d in dropped]:
+            findings.append(_finding(
+                "K8S-024", "MEDIUM", context,
+                f"Container does not drop ALL capabilities: {c.get('name')}",
+                "Best practice is to drop ALL Linux capabilities and then add back only what is needed. "
+                "Without dropping all, the container retains capabilities it may not need.",
+                "Add capabilities.drop: [ALL] to the container securityContext, then add back only required capabilities.",
+                f"spec.containers[{c.get('name')}].securityContext.capabilities.drop"
+            ))
+    return findings
+
+
 # ─────────────────────────────────────────────
 # Registry — used by the agent tool layer
 # ─────────────────────────────────────────────
@@ -422,6 +619,16 @@ CHECK_REGISTRY = {
     "K8S-012": check_liveness_readiness,
     "K8S-013": check_security_context,
     "K8S-014": check_rbac_wildcard,
+    "K8S-015": check_apparmor,
+    "K8S-016": check_default_namespace,
+    "K8S-017": check_allow_privilege_escalation,
+    "K8S-018": check_ssh_port,
+    "K8S-019": check_ingress_tls,
+    "K8S-020": check_service_loadbalancer,
+    "K8S-021": check_image_digest,
+    "K8S-022": check_env_var_secrets,
+    "K8S-023": check_topology_spread,
+    "K8S-024": check_drop_all_capabilities,
 }
 
 

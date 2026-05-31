@@ -5,10 +5,12 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Model](https://img.shields.io/badge/Claude-claude--sonnet--4--6-blueviolet)](https://www.anthropic.com/)
-[![Tests](https://img.shields.io/badge/tests-48%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-76%20passing-brightgreen.svg)](tests/)
 [![Docker Hub](https://img.shields.io/docker/v/jaydenaung17/kubesentinel?label=Docker%20Hub&logo=docker)](https://hub.docker.com/r/jaydenaung17/kubesentinel)
 [![Docker Pulls](https://img.shields.io/docker/pulls/jaydenaung17/kubesentinel?logo=docker)](https://hub.docker.com/r/jaydenaung17/kubesentinel)
 [![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fjaydenaung%2Fkubesentinel-blue?logo=github)](https://ghcr.io/jaydenaung/kubesentinel)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/jaydenaung/k8s-yaml-misconfig-checker-agent)
 
 ---
 
@@ -35,7 +37,7 @@ docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-... -v kubesentinel-data:/ap
 docker run -p 8000:8000 -v kubesentinel-data:/app/data jaydenaung17/kubesentinel:latest
 ```
 
-**What's included in v1.0.0:** static manifest scanning (14 checks) · agentic cluster scanning · compound risk correlation · AI enrichment with attack scenarios · AI patch generation · CIS compliance scanning · token tracking · prompt caching · web dashboard · GitHub Actions PR scanner
+**What's included in v1.0.0:** static manifest scanning (24 checks) · agentic cluster scanning · compound risk correlation · AI enrichment with attack scenarios · AI patch generation · CIS compliance scanning · token tracking · prompt caching · web dashboard · GitHub Actions PR scanner
 
 ---
 
@@ -92,7 +94,7 @@ graph TB
         T1["load_manifest"]
         T2["render_helm_chart"]
         T3["query_cluster  compact fingerprints"]
-        T4["run_check  14 static checks"]
+        T4["run_check  24 static checks"]
         T5["lookup_image_cves  Trivy"]
         T6["probe_service_account  kubectl auth can-i"]
         T7["scan_cluster_images  CVE correlation"]
@@ -145,7 +147,7 @@ Static manifest scan flow:
 ```
 load_manifest / render_helm_chart
         ↓
-run_check(ALL)                        ← 14 static checks across all resources
+run_check(ALL)                        ← 24 static checks across all resources
         ↓
 lookup_image_cves                     ← Trivy CVE scan per unique image
         ↓
@@ -202,7 +204,7 @@ finish                                ← patches stored in DB / returned to CLI
 | Capability | Detail |
 |---|---|
 | **Agentic cluster scanning** | Claude drives the live cluster analysis iteratively — decides tool order and depth based on what it finds. Not a fixed pipeline. Each finding shows its correlated signals, attacker chain, and prioritised remediation steps. |
-| **Static manifest scanning** | Instant, deterministic, no API key required. 14 checks covering CIS Benchmark, NSA/CISA Hardening Guide, OWASP K8s Top 10. |
+| **Static manifest scanning** | Instant, deterministic, no API key required. 24 checks covering CIS Benchmark, NSA/CISA Hardening Guide, OWASP K8s Top 10. |
 | **AI enrichment** ✨ | Post-scan: adds concrete attack scenarios to findings. On-demand button in the web UI, works on both manifest and cluster scans. |
 | **AI patch generation** ✨ | Post-scan: generates corrected YAML for every finding. CLI: `--patch`. Web: "✨ Generate AI Patches" button. |
 | **Compound risk correlation** | Correlates CVE + misconfiguration + RBAC + network signals per pod into proven exploit chains (CMP-001 → CMP-004). |
@@ -387,7 +389,7 @@ source venv/bin/activate
 pytest tests/ -v
 ```
 
-Expected output: **48 tests pass**, covering all 14 static checks and the suppression allowlist. No API key or cluster connection required.
+Expected output: **76 tests pass**, covering all 24 static checks and the suppression allowlist. No API key or cluster connection required.
 
 ### Step 2 — Static manifest scan
 
@@ -554,6 +556,16 @@ Add `ANTHROPIC_API_KEY` as a GitHub Actions secret. On every PR touching `.yaml`
 | K8S-012 | Missing liveness / readiness probes | LOW |
 | K8S-013 | Missing pod-level securityContext / seccomp | MEDIUM |
 | K8S-014 | RBAC wildcard verbs or resources | CRITICAL / HIGH |
+| K8S-015 | Missing AppArmor profile annotation | LOW |
+| K8S-016 | Workload deployed in default namespace | LOW |
+| K8S-017 | allowPrivilegeEscalation not explicitly false | MEDIUM |
+| K8S-018 | Container exposes SSH port 22 | HIGH |
+| K8S-019 | Ingress missing TLS configuration | MEDIUM |
+| K8S-020 | LoadBalancer Service without internal annotation | HIGH |
+| K8S-021 | Image not pinned to SHA digest | LOW |
+| K8S-022 | Secret exposed via envFrom | LOW |
+| K8S-023 | Multi-replica Deployment missing spread constraints | LOW |
+| K8S-024 | Container does not drop ALL capabilities | MEDIUM |
 
 ---
 
@@ -594,7 +606,7 @@ Suppressed findings appear in the report footer for auditability.
 
 | Phase | Feature | Status |
 |---|---|---|
-| ✅ 1 | **Static manifest scanning** — 14 checks, CIS/NSA/OWASP coverage, CLI + web | **Shipped** |
+| ✅ 1 | **Static manifest scanning** — 24 checks, CIS/NSA/OWASP coverage, CLI + web | **Shipped** |
 | ✅ 1b | **Agentic cluster scanning** — Claude-driven loop, SA probing, compound risk correlation | **Shipped** |
 | ✅ 1c | **Token-efficient fingerprinting** — `query_cluster` emits compact security fingerprints (20–272× smaller than raw kubectl JSON) | **Shipped** |
 | ✅ 1d | **AI patch generation** — post-scan, on demand; CLI `--patch` + web button | **Shipped** |
@@ -615,7 +627,7 @@ Suppressed findings appear in the report footer for auditability.
 ```
 kubesentinel/
 ├── agent.py              # CLI entry point — arg parsing, orchestration
-├── analyzer.py           # YAML parser, 14 static checks, CHECK_REGISTRY
+├── analyzer.py           # YAML parser, 24 static checks, CHECK_REGISTRY
 ├── claude_agent.py       # Agentic loops: scan, enrich, patch (Anthropic tool_use API)
 ├── tools.py              # Tool schemas + execution + security fingerprinting layer
 ├── reporter.py           # Markdown and PR comment renderer
@@ -643,7 +655,7 @@ kubesentinel/
 │   ├── routes/           # FastAPI routers (dashboard, manifests, clusters, compliance, images, users, api)
 │   └── templates/        # Jinja2 templates — dashboard UI
 ├── tests/
-│   ├── test_analyzer.py       # 40 unit tests — all 14 static checks
+│   ├── test_analyzer.py       # unit tests — all 24 static checks
 │   ├── test_suppressor.py     # 8 unit tests — suppression logic
 │   ├── test_cis_parsers.py    # CIS parser tests
 │   ├── test_cis_runner.py     # CIS runner tests

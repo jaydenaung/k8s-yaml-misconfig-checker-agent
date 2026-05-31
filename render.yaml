@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: kubesentinel
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    disk:
+      name: kubesentinel-data
+      mountPath: /app/data
+      sizeGB: 1
