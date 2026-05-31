@@ -125,9 +125,19 @@ def run_ai_enrichment(scan_id: int) -> None:
 
 def run_scan(scan_id: int) -> None:
     """Execute a scan and persist all findings. Called as a BackgroundTask."""
+    from web import scan_streams
+    q = scan_streams.create(scan_id)
+
+    def _emit(event: Dict) -> None:
+        try:
+            q.put_nowait(event)
+        except Exception:
+            pass
+
     with get_db() as db:
         scan = db.query(Scan).filter(Scan.id == scan_id).first()
         if not scan:
+            _emit({"type": "done"})
             return
 
         scan.status = "running"
@@ -136,19 +146,22 @@ def run_scan(scan_id: int) -> None:
 
         try:
             if scan.scan_type == "manifest":
-                _run_manifest_scan(db, scan)
+                _run_manifest_scan(db, scan, _emit)
             else:
-                _run_cluster_scan(db, scan)
+                _run_cluster_scan(db, scan, _emit)
         except Exception as exc:
             scan.status = "failed"
             scan.error_message = str(exc)[:1000]
             scan.completed_at = datetime.utcnow()
             db.commit()
+            _emit({"type": "error", "message": str(exc)[:200]})
+        finally:
+            _emit({"type": "done"})
 
 
 # ── Manifest scan ─────────────────────────────────────────────────────────────
 
-def _run_manifest_scan(db, scan: Scan) -> None:
+def _run_manifest_scan(db, scan: Scan, emit) -> None:
     manifest = db.query(Manifest).filter(Manifest.id == scan.target_id).first()
     if not manifest:
         scan.status = "failed"
@@ -161,13 +174,17 @@ def _run_manifest_scan(db, scan: Scan) -> None:
 
     if scan.scan_mode == "ai" and api_key:
         from claude_agent import analyze_with_agent
-        resources, findings, usage = analyze_with_agent(file_path, api_key, verbose=False)
+        resources, findings, usage = analyze_with_agent(
+            file_path, api_key, verbose=False, event_callback=emit
+        )
         _add_usage(scan, usage)
     else:
+        emit({"type": "tool_call", "tool": "run_static_checks", "icon": "🔍", "detail": "running 24 checks..."})
         resources = load_manifests(file_path)
         findings = run_static_checks(resources)
         for f in findings:
             f.setdefault("source", "static")
+            emit({"type": "finding", "severity": f.get("severity", "INFO"), "title": f.get("title", ""), "icon": "⚠️"})
 
     _persist_findings(db, scan, findings)
     _extract_images(db, scan, resources)
@@ -178,7 +195,7 @@ def _run_manifest_scan(db, scan: Scan) -> None:
 
 # ── Cluster scan ──────────────────────────────────────────────────────────────
 
-def _run_cluster_scan(db, scan: Scan) -> None:
+def _run_cluster_scan(db, scan: Scan, emit) -> None:
     cluster = db.query(Cluster).filter(Cluster.id == scan.target_id).first()
     if not cluster:
         scan.status = "failed"
@@ -192,11 +209,14 @@ def _run_cluster_scan(db, scan: Scan) -> None:
     if scan.scan_mode == "ai" and api_key:
         from claude_agent import analyze_cluster_with_agent
         resources, findings, usage = analyze_cluster_with_agent(
-            cluster.name, kubeconfig_path, api_key, verbose=False
+            cluster.name, kubeconfig_path, api_key, verbose=False, event_callback=emit
         )
         _add_usage(scan, usage)
     else:
+        emit({"type": "tool_call", "tool": "query_cluster", "icon": "🌐", "detail": "running static cluster checks..."})
         resources, findings = _cluster_static_checks(kubeconfig_path)
+        for f in findings:
+            emit({"type": "finding", "severity": f.get("severity", "INFO"), "title": f.get("title", ""), "icon": "⚠️"})
 
     _persist_findings(db, scan, findings)
     _extract_images(db, scan, resources)

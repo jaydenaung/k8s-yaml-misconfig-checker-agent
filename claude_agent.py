@@ -141,6 +141,7 @@ def analyze_cluster_with_agent(
     api_key: str,
     verbose: bool = False,
     model: str = None,
+    event_callback=None,
 ) -> Tuple[List[Dict], List[Dict], Dict]:
     """Agentic analysis of a live cluster. Returns (resources, findings, token_usage)."""
     client = anthropic.Anthropic(api_key=api_key, max_retries=3)
@@ -192,6 +193,8 @@ def analyze_cluster_with_agent(
             if block.type == "tool_use":
                 if verbose:
                     _log_tool_call(block.name, block.input)
+                if event_callback:
+                    event_callback(_make_event(block.name, block.input))
                 result = execute_tool(block.name, block.input, state)
                 result_json = json.dumps(result)
                 if len(result_json) > 8000:
@@ -216,6 +219,7 @@ def analyze_with_agent(
     api_key: str,
     verbose: bool = True,
     model: str = None,
+    event_callback=None,
 ) -> Tuple[List[Dict], List[Dict], Dict]:
     """Agentic manifest analysis. Returns (resources, findings, token_usage)."""
     client = anthropic.Anthropic(api_key=api_key, max_retries=3)
@@ -274,6 +278,8 @@ def analyze_with_agent(
             if block.type == "tool_use":
                 if verbose:
                     _log_tool_call(block.name, block.input)
+                if event_callback:
+                    event_callback(_make_event(block.name, block.input))
                 result = execute_tool(block.name, block.input, state)
                 result_json = json.dumps(result)
                 if len(result_json) > 8000:
@@ -475,37 +481,54 @@ def enrich_findings_with_ai(
 
 
 _TOOL_ICONS = {
-    "load_manifest":     "📂",
-    "render_helm_chart": "⎈",
-    "query_cluster":     "🌐",
-    "run_check":         "🔍",
-    "lookup_image_cves": "🛡",
-    "report_finding":    "⚠",
+    "load_manifest":         "📂",
+    "render_helm_chart":     "⎈",
+    "query_cluster":         "🌐",
+    "run_check":             "🔍",
+    "lookup_image_cves":     "🛡",
+    "report_finding":        "⚠️",
     "probe_service_account": "🔑",
     "scan_cluster_images":   "🔬",
     "suggest_patch":         "🔧",
-    "finish":            "✅",
+    "finish":                "✅",
 }
+
+
+def _format_detail(name: str, input_data: Dict) -> str:
+    if name == "run_check":
+        return f"check={input_data.get('check_id')}  resource={input_data.get('resource_index')}"
+    if name == "lookup_image_cves":
+        return input_data.get("image", "")
+    if name == "report_finding":
+        return f"[{input_data.get('severity')}] {input_data.get('title', '')}"
+    if name == "probe_service_account":
+        return f"{input_data.get('service_account')} ({input_data.get('namespace')})"
+    if name == "scan_cluster_images":
+        return f"namespace={input_data.get('namespace', 'all')}"
+    if name == "suggest_patch":
+        return f"[{input_data.get('check_id')}] {input_data.get('context', '')}"
+    if name == "finish":
+        return (input_data.get("summary") or "")[:80]
+    return str(input_data)[:80]
+
+
+def _make_event(name: str, input_data: Dict) -> Dict:
+    """Build an SSE event dict for a single tool call."""
+    if name == "report_finding":
+        return {
+            "type":     "finding",
+            "severity": input_data.get("severity", "INFO"),
+            "title":    input_data.get("title", ""),
+            "icon":     "⚠️",
+        }
+    return {
+        "type":   "tool_call",
+        "tool":   name,
+        "icon":   _TOOL_ICONS.get(name, "🔧"),
+        "detail": _format_detail(name, input_data),
+    }
 
 
 def _log_tool_call(name: str, input_data: Dict) -> None:
     icon = _TOOL_ICONS.get(name, "🔧")
-
-    if name == "run_check":
-        detail = f"check={input_data.get('check_id')}  resource={input_data.get('resource_index')}"
-    elif name == "lookup_image_cves":
-        detail = input_data.get("image", "")
-    elif name == "report_finding":
-        detail = f"[{input_data.get('severity')}] {input_data.get('title', '')}"
-    elif name == "probe_service_account":
-        detail = f"{input_data.get('service_account')} ({input_data.get('namespace')})"
-    elif name == "scan_cluster_images":
-        detail = f"namespace={input_data.get('namespace', 'all')}"
-    elif name == "suggest_patch":
-        detail = f"[{input_data.get('check_id')}] {input_data.get('context', '')}"
-    elif name == "finish":
-        detail = (input_data.get("summary") or "")[:80]
-    else:
-        detail = str(input_data)[:80]
-
-    print(f"      {icon}  {name}({detail})")
+    print(f"      {icon}  {name}({_format_detail(name, input_data)})")

@@ -11,25 +11,61 @@
 
 {% if latest_scan %}
 {% if latest_scan.status in ('queued', 'running') %}
-<div class="alert alert-info" id="scan-status-banner">
-  <span class="spinner"></span>
-  Scan #{{ latest_scan.id }} is <strong>{{ latest_scan.status }}</strong> — results will appear automatically.
+<div class="card" id="sse-feed" style="margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <span class="spinner"></span>
+    <strong>Scan #{{ latest_scan.id }} — AI Agent is reasoning…</strong>
+  </div>
+  <div id="sse-log" style="font-family:monospace;font-size:12px;max-height:260px;overflow-y:auto;background:#0f172a;color:#e2e8f0;border-radius:6px;padding:10px 12px;line-height:1.6"></div>
 </div>
-{% endif %}
-{% if latest_scan.status in ('queued', 'running') or latest_scan.enrichment_status == 'generating' %}
 <script>
-(function poll() {
+(function() {
+  var log = document.getElementById('sse-log');
+  var SEV_COLOR = {CRITICAL:'#f87171',HIGH:'#fb923c',MEDIUM:'#fbbf24',LOW:'#94a3b8',INFO:'#94a3b8'};
+
+  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function append(html) {
+    var d = document.createElement('div');
+    d.innerHTML = html;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  var es = new EventSource('/api/scans/{{ latest_scan.id }}/stream');
+
+  es.onmessage = function(e) {
+    var data = JSON.parse(e.data);
+    if (data.type === 'done') { es.close(); location.reload(); return; }
+    if (data.type === 'error') {
+      append('<span style="color:#f87171">❌ ' + esc(data.message) + '</span>');
+      return;
+    }
+    if (data.type === 'finding') {
+      var c = SEV_COLOR[data.severity] || '#94a3b8';
+      append('<span style="color:' + c + ';font-weight:600">' + esc(data.icon||'⚠️') + ' [' + esc(data.severity) + ']</span> ' + esc(data.title));
+    } else {
+      append('<span style="color:#7dd3fc">' + esc(data.icon||'🔧') + ' ' + esc(data.tool) + '</span> <span style="color:#64748b">' + esc(data.detail||'') + '</span>');
+    }
+  };
+
+  es.onerror = function() {
+    es.close();
+    setTimeout(function() { location.reload(); }, 3000);
+  };
+})();
+</script>
+{% endif %}
+{% if latest_scan.enrichment_status == 'generating' %}
+<script>
+(function pollEnrich() {
   setTimeout(function() {
     fetch('/api/scans/{{ latest_scan.id }}/status')
       .then(r => r.json())
       .then(d => {
-        var scanDone      = d.status === 'done' || d.status === 'failed';
-        var enrichDone    = d.enrichment_status === 'done' || d.enrichment_status === 'failed';
-        var stillRunning  = d.status === 'queued' || d.status === 'running';
-        var enrichRunning = d.enrichment_status === 'generating';
-        if ((!stillRunning && !enrichRunning) || scanDone || enrichDone) { location.reload(); }
-        else { poll(); }
-      }).catch(poll);
+        if (d.enrichment_status !== 'generating') { location.reload(); }
+        else { pollEnrich(); }
+      }).catch(pollEnrich);
   }, 3000);
 })();
 </script>
