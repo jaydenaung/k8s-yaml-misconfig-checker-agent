@@ -137,6 +137,12 @@ class ComplianceResult(Base):
     checked_at      = Column(DateTime, default=datetime.utcnow)
 
 
+class Setting(Base):
+    __tablename__ = "settings"
+    key   = Column(String(64), primary_key=True)
+    value = Column(Text, nullable=True)
+
+
 class Image(Base):
     __tablename__ = "images"
     id           = Column(Integer, primary_key=True, index=True)
@@ -196,3 +202,19 @@ def get_db():
 def has_users() -> bool:
     with get_db() as db:
         return db.query(User).count() > 0
+
+
+def get_setting(key: str, default: str = "") -> str:
+    with get_db() as db:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        return row.value if (row and row.value is not None) else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with get_db() as db:
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row:
+            row.value = value
+        else:
+            db.add(Setting(key=key, value=value))
+        db.commit()

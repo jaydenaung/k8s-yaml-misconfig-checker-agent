@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Settings — KubeSentinel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Settings</div>
+    <div class="page-subtitle">Admin-only configuration</div>
+  </div>
+</div>
+
+{% if saved %}
+<div class="alert alert-success">Settings saved.</div>
+{% endif %}
+
+{% if test_result == 'ok' %}
+<div class="alert alert-success">Webhook test succeeded — endpoint returned HTTP {{ status }}.</div>
+{% elif test_result == 'http_error' %}
+<div class="alert alert-error">Webhook test failed — endpoint returned HTTP {{ status }}. Check the URL, token, and format.</div>
+{% elif test_result == 'error' %}
+<div class="alert alert-error">Webhook test failed — {{ request.query_params.get('msg', 'connection error') }}. Check the URL is reachable.</div>
+{% elif test_result == 'no_url' %}
+<div class="alert alert-error">No webhook URL configured. Enter a URL and save before testing.</div>
+{% endif %}
+
+<!-- SIEM Webhook -->
+<div class="card">
+  <div class="card-title">🔗 SIEM Webhook</div>
+  <p class="text-muted mb-4" style="font-size:13px">
+    POST scan results to your SIEM or alerting platform after every completed scan.
+    Supports generic JSON (Elastic, Datadog, custom) and Splunk HEC format.
+    Settings here take precedence over <code>WEBHOOK_*</code> environment variables.
+  </p>
+
+  <form method="post" action="/settings/webhook">
+    <div class="form-group">
+      <label class="form-label">Webhook URL</label>
+      <input
+        type="url"
+        name="webhook_url"
+        class="form-control"
+        placeholder="https://your-siem.example.com/ingest"
+        value="{{ webhook_url }}"
+      >
+      <div class="form-hint">
+        Splunk HEC example: <code>https://splunk.example.com:8088/services/collector</code>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Auth Token</label>
+      <input
+        type="password"
+        name="webhook_token"
+        class="form-control"
+        placeholder="{% if webhook_token %}••••••••••••{% else %}Bearer or Splunk HEC token{% endif %}"
+        value="{{ webhook_token }}"
+        autocomplete="new-password"
+      >
+      <div class="form-hint">Sent as <code>Bearer &lt;token&gt;</code> (JSON) or <code>Splunk &lt;token&gt;</code> (Splunk HEC). Leave blank if your endpoint requires no auth.</div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Format</label>
+      <select name="webhook_format" class="form-control" style="max-width:200px">
+        <option value="json"   {% if webhook_format == 'json'   %}selected{% endif %}>JSON (generic)</option>
+        <option value="splunk" {% if webhook_format == 'splunk' %}selected{% endif %}>Splunk HEC</option>
+      </select>
+      <div class="form-hint">
+        JSON: plain payload with <code>Authorization: Bearer &lt;token&gt;</code><br>
+        Splunk HEC: wrapped in <code>{"time":…,"sourcetype":"kubesentinel:scan","event":{…}}</code>
+      </div>
+    </div>
+
+    <div class="flex gap-2" style="margin-top:18px">
+      <button type="submit" class="btn btn-primary">Save</button>
+      {% if webhook_url %}
+      <button type="button" class="btn btn-secondary"
+        onclick="document.getElementById('test-form').submit()">
+        Send test event
+      </button>
+      {% endif %}
+      {% if webhook_url %}
+      <button
+        type="submit"
+        formaction="/settings/webhook"
+        formmethod="post"
+        class="btn btn-secondary"
+        onclick="document.querySelector('[name=webhook_url]').value='';document.querySelector('[name=webhook_token]').value=''"
+        style="margin-left:auto;color:#dc2626"
+      >Clear</button>
+      {% endif %}
+    </div>
+  </form>
+
+  <form id="test-form" method="post" action="/settings/webhook/test" style="display:none"></form>
+</div>
+
+<!-- Payload reference -->
+<div class="card">
+  <div class="card-title">📋 Payload Reference</div>
+  <p class="text-muted mb-3" style="font-size:13px">Fields included in every webhook POST.</p>
+  <pre style="font-family:ui-monospace,monospace;font-size:12px;background:#0f172a;color:#e2e8f0;padding:16px;border-radius:6px;overflow-x:auto;line-height:1.6">{
+  "source":       "kubesentinel",
+  "scan_id":      42,
+  "scan_type":    "cluster",          <span style="color:#64748b">// "manifest" | "cluster"</span>
+  "target":       "prod-cluster",
+  "scan_mode":    "ai",               <span style="color:#64748b">// "static" | "ai"</span>
+  "triggered_by": "admin",
+  "status":       "done",
+  "started_at":   "2026-05-31T10:00:00",
+  "completed_at": "2026-05-31T10:01:23",
+  "summary": {
+    "critical": 3,
+    "high":     5,
+    "medium":   8,
+    "low":      12,
+    "total":    28
+  },
+  "findings": [
+    {
+      "check_id":       "K8S-001",
+      "severity":       "CRITICAL",
+      "source":         "static",
+      "context":        "Deployment/api",
+      "title":          "Privileged container: api",
+      "detail":         "...",
+      "remediation":    "...",
+      "attack_scenario": "...",
+      "resource_path":  "spec.containers[api].securityContext.privileged"
+    }
+  ]
+}</pre>
+</div>
+{% endblock %}

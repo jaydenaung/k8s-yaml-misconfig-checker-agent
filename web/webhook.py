@@ -61,14 +61,21 @@ def _build_payload(scan: Scan, findings: list) -> Dict:
     }
 
 
+def _cfg(db_key: str, env_key: str, default: str = "") -> str:
+    """Read a config value from the DB settings table, falling back to env var."""
+    from web.database import get_setting
+    val = get_setting(db_key)
+    return val if val else os.environ.get(env_key, default)
+
+
 def dispatch(scan_id: int) -> None:
     """POST scan results to the configured webhook. No-op if WEBHOOK_URL is unset."""
-    url = os.environ.get("WEBHOOK_URL", "").strip()
+    url = _cfg("webhook_url", "WEBHOOK_URL").strip()
     if not url:
         return
 
-    token  = os.environ.get("WEBHOOK_TOKEN", "").strip()
-    fmt    = os.environ.get("WEBHOOK_FORMAT", "json").lower()
+    token  = _cfg("webhook_token", "WEBHOOK_TOKEN").strip()
+    fmt    = _cfg("webhook_format", "WEBHOOK_FORMAT", "json").lower()
     if fmt not in _SUPPORTED_FORMATS:
         fmt = "json"
 
