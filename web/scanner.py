@@ -149,6 +149,8 @@ def run_scan(scan_id: int) -> None:
                 _run_manifest_scan(db, scan, _emit)
             else:
                 _run_cluster_scan(db, scan, _emit)
+            from web.webhook import dispatch as _webhook
+            _webhook(scan_id)
         except Exception as exc:
             scan.status = "failed"
             scan.error_message = str(exc)[:1000]
